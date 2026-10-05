@@ -259,6 +259,46 @@ export async function openTaskDetail(id) {
   renderTaskView(b);
 }
 
+/**
+ * Refresh the task editor in place after a mutation.
+ *
+ * Editing actions used to call openTaskDetail(), which re-rendered the
+ * read-only view and threw the user out of the form on every save, tag,
+ * comment, relationship or attachment change. This reloads the bundle and
+ * re-renders the editor so it stays open, while snapshotting and restoring
+ * any fields the user has typed into but not yet saved.
+ */
+async function reloadTaskEditor(id) {
+  const snapshot = snapshotEditorFields();
+  const b = await loadTaskBundle(id);
+  if (!b || !b.task) { closeModal("task-modal"); return; }
+  renderTaskEditor(b);
+  restoreEditorFields(snapshot);
+}
+
+function snapshotEditorFields() {
+  const snap = {};
+  document.querySelectorAll('#task-modal [id^="tm-"]').forEach(el => {
+    if (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT") {
+      snap[el.id] = { tag: el.tagName, value: el.value };
+    }
+  });
+  return snap;
+}
+
+function restoreEditorFields(snap) {
+  Object.entries(snap || {}).forEach(([id, saved]) => {
+    const el = document.getElementById(id);
+    if (!el || el.tagName !== saved.tag) return;
+    if (el.tagName === "SELECT") {
+      // Only restore if the option still exists (e.g. the project list loaded).
+      if ([...el.options].some(o => o.value === saved.value)) el.value = saved.value;
+    } else {
+      el.value = saved.value;
+    }
+  });
+}
+
 async function loadTaskBundle(id) {
   let task, history = [], comments = [], rels = [], myTags = [], tags = [], allTasks = [];
   try {
@@ -518,7 +558,7 @@ function renderTaskEditor(b) {
       });
       toast(`Updated ${task.key}`);
       refreshPage();
-      openTaskDetail(task.id);
+      reloadTaskEditor(task.id);
     } catch (e) { toast(e.message, true); }
   };
 
@@ -554,7 +594,7 @@ function renderTaskEditor(b) {
       }
       await call("add_task_tag", { task_id: id, tag_id: tagId });
       toast("Tag added");
-      openTaskDetail(task.id);
+      reloadTaskEditor(task.id);
     } catch (e) { toast(e.message, true); }
   };
 
@@ -562,7 +602,7 @@ function renderTaskEditor(b) {
     el.addEventListener("click", async () => {
       try {
         await call("remove_task_tag", { task_id: id, tag_id: Number(el.dataset.tagDel) });
-        openTaskDetail(task.id);
+        reloadTaskEditor(task.id);
       } catch (e) { toast(e.message, true); }
     });
   });
@@ -572,7 +612,7 @@ function renderTaskEditor(b) {
     if (!content) { toast("Comment is empty.", true); return; }
     try {
       await call("create_comment", { input: { task_id: id, content } });
-      openTaskDetail(task.id);
+      reloadTaskEditor(task.id);
     } catch (e) { toast(e.message, true); }
   };
 
@@ -581,7 +621,7 @@ function renderTaskEditor(b) {
       if (!(await confirmDialog("Delete this comment?", { title: "Delete comment" }))) return;
       try {
         await call("delete_comment", { id: Number(el.dataset.commentDel) });
-        openTaskDetail(task.id);
+        reloadTaskEditor(task.id);
       } catch (e) { toast(e.message, true); }
     });
   });
@@ -593,7 +633,7 @@ function renderTaskEditor(b) {
     try {
       await call("add_relationship", { input: { source_task_id: task.id, target_task_id: target, rel_type: relType } });
       toast("Relationship added");
-      openTaskDetail(task.id);
+      reloadTaskEditor(task.id);
     } catch (e) { toast(e.message, true); }
   };
 
@@ -602,7 +642,7 @@ function renderTaskEditor(b) {
       if (!(await confirmDialog("Remove this relationship?", { title: "Remove relationship", confirmLabel: "Remove" }))) return;
       try {
         await call("remove_relationship", { id: Number(el.dataset.relDel) });
-        openTaskDetail(task.id);
+        reloadTaskEditor(task.id);
       } catch (e) { toast(e.message, true); }
     });
   });
@@ -616,7 +656,7 @@ function renderTaskEditor(b) {
         input: { task_id: task.id, project_id: task.projectId, description: text, duration_minutes: dur || null },
       });
       toast("Work logged");
-      openTaskDetail(task.id);
+      reloadTaskEditor(task.id);
     } catch (e) { toast(e.message, true); }
   };
 
@@ -643,7 +683,7 @@ function renderTaskEditor(b) {
           toast(`Attached ${f.name}`);
         } catch (e) { toast(`Failed to attach ${f.name}: ${e.message}`, true); }
       }
-      openTaskDetail(task.id);
+      reloadTaskEditor(task.id);
     };
   }
   document.querySelectorAll("[data-att-del]").forEach(el => {
@@ -651,7 +691,7 @@ function renderTaskEditor(b) {
       if (!(await confirmDialog("Remove this attachment?", { title: "Remove attachment", confirmLabel: "Remove" }))) return;
       try {
         await call("remove_attachment", { id: Number(el.dataset.attDel) });
-        openTaskDetail(task.id);
+        reloadTaskEditor(task.id);
       } catch (e) { toast(e.message, true); }
     });
   });
