@@ -403,11 +403,16 @@ export async function render(container) {
         ? `<div class="xs muted mt-2" style="white-space:pre-wrap">${esc(info.notes)}</div>`
         : "";
       const actions = `<div class="row mt-2" style="gap:8px">
-          ${info.updateAvailable && info.releaseUrl ? `<button class="btn btn-sm btn-primary" id="set-update-open">Open release page</button>` : ""}
+          ${info.updateAvailable ? `<button class="btn btn-sm btn-primary" id="set-update-install">Download &amp; install</button>` : ""}
+          ${info.updateAvailable && info.releaseUrl ? `<button class="btn btn-sm" id="set-update-open">Open release page</button>` : ""}
           <button class="btn btn-sm" id="set-update-repo">Open repository</button>
-        </div>`;
+        </div>
+        <div id="set-update-progress" class="mt-2"></div>`;
       status.innerHTML = head + meta + notes + actions;
 
+      document.getElementById("set-update-install")?.addEventListener("click", () => {
+        installUpdate(status, info);
+      });
       document.getElementById("set-update-open")?.addEventListener("click", async () => {
         try {
           await call("open_github_page", { page: "releases" });
@@ -424,6 +429,65 @@ export async function render(container) {
       if (btn) { btn.disabled = false; btn.textContent = "Check for updates"; }
     }
   });
+
+  /**
+   * Download and apply a signed update through the official Tauri updater,
+   * showing download progress and relaunching into the new version.
+   */
+  async function installUpdate(status, info) {
+    const progress = document.getElementById("set-update-progress");
+    const btn = document.getElementById("set-update-install");
+    const bar = (pct) => `<div class="xs muted mt-1">Downloading… ${Math.round(pct)}%</div>
+      <div style="height:6px;border-radius:4px;background:var(--line2);overflow:hidden;margin-top:4px">
+        <div style="height:100%;width:${Math.max(2, Math.round(pct))}%;background:var(--accent);transition:width .2s"></div>
+      </div>`;
+
+    if (btn) { btn.disabled = true; btn.textContent = "Installing…"; }
+    if (progress) progress.innerHTML = `<div class="xs muted mt-1">Preparing update ${esc(String(info.latest ?? ""))}…</div>`;
+
+    try {
+      // Plugin APIs are attached directly to window.__TAURI__ by Tauri's
+      // withGlobalTauri build (see each plugin's api-iife.js).
+      const updater = window.__TAURI__.updater;
+      const proc = window.__TAURI__.process;
+      if (!updater?.check || !proc?.relaunch) {
+        throw new Error("The updater plugin is unavailable in this build.");
+      }
+
+      const update = await updater.check({ timeout: 15000 });
+      if (!update) {
+        if (progress) progress.innerHTML = `<div class="xs mt-1" style="color:var(--red)">No signed update is published for this platform yet. Use the release page instead.</div>`;
+        return;
+      }
+      if (!update.available) {
+        if (progress) progress.innerHTML = `<div class="xs mt-1 muted">DuckTrack ${esc(String(update.currentVersion))} is already the latest version.</div>`;
+        return;
+      }
+
+      let downloaded = 0;
+      let total = 0;
+      await update.downloadAndInstall((e) => {
+        if (e.event === "Started") {
+          total = e.data.contentLength ?? 0;
+          if (progress) progress.innerHTML = bar(0);
+        } else if (e.event === "Progress") {
+          downloaded += e.data.chunkLength;
+          if (progress) progress.innerHTML = bar(total ? (downloaded / total) * 100 : 0);
+        } else if (e.event === "Finished" && progress) {
+          progress.innerHTML = `<div class="xs mt-1" style="color:var(--green)">Installed. Restarting…</div>`;
+        }
+      });
+
+      if (progress) progress.innerHTML = `<div class="xs mt-1" style="color:var(--green)">Update installed. Restarting DuckTrack…</div>`;
+      await proc.relaunch();
+    } catch (e) {
+      const msg = String(e.message ?? e);
+      if (progress) progress.innerHTML = `<div class="xs mt-1" style="color:var(--red)">Install failed: ${esc(msg)}<br>
+        <span class="muted">You can download the installer from the release page instead.</span></div>`;
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = "Download & install"; }
+    }
+  }
 
   document.getElementById("set-reset")?.addEventListener("click", async () => {
     if (!(await confirmDialog("Reset the workspace? This deletes ALL projects, tasks, documents, work logs and history. This cannot be undone.", { title: "Reset workspace", confirmLabel: "Reset" }))) return;

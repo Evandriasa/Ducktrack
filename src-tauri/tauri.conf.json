@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "DuckTrack",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "identifier": "com.ducktrack.workspace",
   "build": {
     "frontendDist": "../src"
@@ -25,7 +25,14 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["deb", "rpm", "appimage", "nsis", "msi", "dmg"],
+    "targets": [
+      "deb",
+      "rpm",
+      "appimage",
+      "nsis",
+      "msi",
+      "dmg"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -37,10 +44,14 @@
     "longDescription": "DuckTrack is a local-first engineering workspace: nested projects, an automatic immutable change log, per-task work logs, documentation, portfolio summaries and multi-user support. All data stays on your machine.",
     "publisher": "DuckTrack",
     "category": "DeveloperTool",
-    "copyright": "Copyright \u00a9 2026 DuckTrack",
+    "copyright": "Copyright © 2026 DuckTrack",
     "linux": {
       "deb": {
-        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0", "libappindicator3-1"]
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0",
+          "libappindicator3-1"
+        ]
       }
     },
     "macOS": {
@@ -49,7 +60,21 @@
     "windows": {
       "nsis": {
         "installMode": "currentUser",
-        "languages": ["English"]
+        "languages": [
+          "English"
+        ]
+      }
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/Evandriasa/Ducktrack/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk4NkIxQzYzMTY3QUQxMTAKUldRUTBYb1dZeHhybURldHNvSzVhVTV4azdTeWJjMER3UlBDZGJYS3JKYkdqajhuQkRFOEdlOFIK",
+      "windows": {
+        "installMode": "passive"
       }
     }
   }

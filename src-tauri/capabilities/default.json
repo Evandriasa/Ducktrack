@@ -9,6 +9,9 @@
     "core:window:allow-toggle-maximize",
     "core:window:allow-close",
     "core:window:allow-start-dragging",
-    "notification:default"
+    "notification:default",
+    "updater:default",
+    "process:allow-restart",
+    "process:allow-exit"
   ]
 }
