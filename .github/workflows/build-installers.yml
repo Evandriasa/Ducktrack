@@ -49,11 +49,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Signs the updater bundles so the in-app "Download & install"
-          # button can verify them. Repository secrets:
-          #   TAURI_SIGNING_PRIVATE_KEY         (contents of the .key file)
-          #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD (empty for an unencrypted key)
+          # button can verify them. The key is unencrypted, so no
+          # TAURI_SIGNING_PRIVATE_KEY_PASSWORD is needed (GitHub rejects empty
+          # secret values, and an unencrypted key must not be given one).
+          # Repository secret:
+          #   TAURI_SIGNING_PRIVATE_KEY  (contents of the .key file)
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: v__VERSION__
           releaseName: "DuckTrack v__VERSION__"
