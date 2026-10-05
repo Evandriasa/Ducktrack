@@ -9,6 +9,11 @@ on:
 
 jobs:
   build:
+    # Required so the action can create the GitHub release and upload assets.
+    # Repositories created with GitHub's default settings issue a read-only
+    # GITHUB_TOKEN, which makes release creation fail with HTTP 403.
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -47,6 +52,7 @@ jobs:
           tagName: v__VERSION__
           releaseName: "DuckTrack v__VERSION__"
           releaseBody: "See the assets below for installers for your platform."
-          releaseDraft: true
+          # Must be published (not draft) for the in-app update checker to see it.
+          releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
