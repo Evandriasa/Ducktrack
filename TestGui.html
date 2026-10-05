@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DuckTrack — Engineering Workspace</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        ink: "#0b1120",
+        panel: "#111827",
+        panel2: "#172033",
+        line: "#263247",
+        muted: "#8b98ad",
+        accent: "#60a5fa"
+      }
+    }
+  }
+}
+</script>
+<style>
+  * { scrollbar-width: thin; scrollbar-color: #334155 transparent; }
+  body { background:#0b1120; color:#e5e7eb; }
+  .glass { background:rgba(17,24,39,.82); backdrop-filter:blur(14px); }
+  .grid-bg {
+    background-image: linear-gradient(rgba(148,163,184,.035) 1px, transparent 1px),
+                      linear-gradient(90deg, rgba(148,163,184,.035) 1px, transparent 1px);
+    background-size:32px 32px;
+  }
+  .nav-active { background:#1d293d; color:#fff; box-shadow:inset 3px 0 0 #60a5fa; }
+  .dot { width:8px; height:8px; border-radius:999px; display:inline-block; }
+  .status-done { background:#34d399; }
+  .status-progress { background:#60a5fa; }
+  .status-blocked { background:#f87171; }
+  .status-todo { background:#94a3b8; }
+  .bar { height:7px; border-radius:999px; background:#263247; overflow:hidden; }
+  .bar > span { display:block; height:100%; border-radius:999px; background:#60a5fa; }
+  .card { border:1px solid #263247; background:#111827; }
+  .card:hover { border-color:#3b4c68; }
+  .kbd { border:1px solid #334155; background:#172033; border-radius:5px; padding:2px 6px; font-size:11px; color:#94a3b8; }
+</style>
+</head>
+
+<body class="min-h-screen grid-bg">
+<div class="flex h-screen overflow-hidden">
+
+  <!-- SIDEBAR -->
+  <aside class="w-64 shrink-0 border-r border-line bg-[#0d1524] flex flex-col">
+    <div class="h-16 px-5 flex items-center gap-3 border-b border-line">
+      <div class="w-9 h-9 rounded-lg bg-blue-500/15 border border-blue-400/25 flex items-center justify-center text-blue-300 font-bold">D</div>
+      <div>
+        <div class="font-semibold tracking-wide">DuckTrack</div>
+        <div class="text-[11px] text-muted">Engineering Workspace</div>
+      </div>
+    </div>
+
+    <div class="p-3">
+      <button onclick="newTask()" class="w-full flex items-center justify-center gap-2 rounded-lg bg-blue-500 hover:bg-blue-400 text-slate-950 font-semibold py-2.5 transition">
+        <span class="text-lg">+</span> New task
+      </button>
+    </div>
+
+    <nav class="px-3 space-y-1 text-sm">
+      <button onclick="showPage('dashboard', this)" class="nav-btn nav-active w-full text-left px-3 py-2.5 rounded-lg flex gap-3 items-center">⌂ <span>Dashboard</span></button>
+      <button onclick="showPage('tasks', this)" class="nav-btn w-full text-left px-3 py-2.5 rounded-lg flex gap-3 items-center text-slate-400 hover:text-white hover:bg-panel2">✓ <span>My Tasks</span><span class="ml-auto text-xs text-muted">12</span></button>
+      <button onclick="showPage('projects', this)" class="nav-btn w-full text-left px-3 py-2.5 rounded-lg flex gap-3 items-center text-slate-400 hover:text-white hover:bg-panel2">▣ <span>Projects</span></button>
+      <button onclick="showPage('changelog', this)" class="nav-btn w-full text-left px-3 py-2.5 rounded-lg flex gap-3 items-center text-slate-400 hover:text-white hover:bg-panel2">↻ <span>Change Log</span></button>
+      <button onclick="showPage('worklog', this)" class="nav-btn w-full text-left px-3 py-2.5 rounded-lg flex gap-3 items-center text-slate-400 hover:text-white hover:bg-panel2">◷ <span>Work Log</span></button>
+      <button onclick="showPage('docs', this)" class="nav-btn w-full text-left px-3 py-2.5 rounded-lg flex gap-3 items-center text-slate-400 hover:text-white hover:bg-panel2">▤ <span>Documentation</span></button>
+      <button onclick="showPage('portfolio', this)" class="nav-btn w-full text-left px-3 py-2.5 rounded-lg flex gap-3 items-center text-slate-400 hover:text-white hover:bg-panel2">◇ <span>Portfolio</span></button>
+    </nav>
+
+    <div class="mt-6 px-3">
+      <div class="px-3 mb-2 text-[10px] uppercase tracking-widest text-slate-600">Projects</div>
+      <button class="w-full text-left px-3 py-2 rounded-lg text-sm text-slate-400 hover:bg-panel2 hover:text-white">▸ AGV Middleware</button>
+      <button class="w-full text-left px-3 py-2 rounded-lg text-sm text-slate-400 hover:bg-panel2 hover:text-white">▸ Pilot Line</button>
+      <button class="w-full text-left px-3 py-2 rounded-lg text-sm text-slate-400 hover:bg-panel2 hover:text-white">▸ Plant Testing</button>
+      <button class="w-full text-left px-3 py-2 rounded-lg text-sm text-slate-400 hover:bg-panel2 hover:text-white">▸ Cartesian Robot</button>
+    </div>
+
+    <div class="mt-auto p-3 border-t border-line">
+      <div class="flex items-center gap-3 px-2 py-2">
+        <div class="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-xs">DM</div>
+        <div class="min-w-0">
+          <div class="text-sm font-medium">Ducky</div>
+          <div class="text-xs text-muted truncate">Engineering workspace</div>
+        </div>
+        <button class="ml-auto text-muted hover:text-white">⚙</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="flex-1 min-w-0 flex flex-col">
+    <header class="h-16 shrink-0 border-b border-line glass flex items-center px-6 gap-5">
+      <div class="text-sm text-muted">Workspace / <span class="text-slate-200">Overview</span></div>
+      <div class="ml-auto relative w-80">
+        <span class="absolute left-3 top-2.5 text-muted">⌕</span>
+        <input placeholder="Search tasks, projects, changes..." class="w-full bg-[#0b1120] border border-line rounded-lg pl-9 pr-14 py-2 text-sm outline-none focus:border-blue-400/60">
+        <span class="absolute right-2 top-2.5 kbd">Ctrl K</span>
+      </div>
+      <button class="text-muted hover:text-white text-lg">?</button>
+      <button class="text-muted hover:text-white text-lg">◌</button>
+    </header>
+
+    <div id="page-dashboard" class="page flex-1 overflow-auto p-6">
+      <div class="max-w-[1500px] mx-auto">
+        <div class="flex items-end justify-between mb-7">
+          <div>
+            <div class="text-xs uppercase tracking-[.2em] text-blue-300 mb-2">Friday · 11 September 2026</div>
+            <h1 class="text-3xl font-semibold">Good morning, Ducky.</h1>
+            <p class="text-muted mt-1">Here's what is happening across your work.</p>
+          </div>
+          <button onclick="newTask()" class="border border-line bg-panel hover:bg-panel2 px-4 py-2 rounded-lg text-sm">+ Add task</button>
+        </div>
+
+        <!-- STATS -->
+        <div class="grid grid-cols-4 gap-4 mb-6">
+          <div class="card rounded-xl p-5">
+            <div class="text-xs text-muted uppercase tracking-wider">Open tasks</div>
+            <div class="text-3xl font-semibold mt-2">24</div>
+            <div class="text-xs text-slate-500 mt-1">12 assigned to you</div>
+          </div>
+          <div class="card rounded-xl p-5">
+            <div class="text-xs text-muted uppercase tracking-wider">In progress</div>
+            <div class="text-3xl font-semibold mt-2">7</div>
+            <div class="text-xs text-blue-300 mt-1">3 updated today</div>
+          </div>
+          <div class="card rounded-xl p-5">
+            <div class="text-xs text-muted uppercase tracking-wider">Completed</div>
+            <div class="text-3xl font-semibold mt-2">127</div>
+            <div class="text-xs text-emerald-300 mt-1">+18 this month</div>
+          </div>
+          <div class="card rounded-xl p-5">
+            <div class="text-xs text-muted uppercase tracking-wider">Blocked</div>
+            <div class="text-3xl font-semibold mt-2">3</div>
+            <div class="text-xs text-red-300 mt-1">Needs attention</div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-12 gap-5">
+          <!-- ACTIVE WORK -->
+          <section class="col-span-8 card rounded-xl">
+            <div class="px-5 py-4 border-b border-line flex items-center">
+              <div>
+                <h2 class="font-semibold">Active work</h2>
+                <p class="text-xs text-muted mt-1">Tasks currently being worked on</p>
+              </div>
+              <button onclick="showPage('tasks')" class="ml-auto text-xs text-blue-300 hover:text-blue-200">View all →</button>
+            </div>
+
+            <div class="divide-y divide-[#263247]">
+              <div onclick="openTask('AGV-042')" class="px-5 py-4 hover:bg-panel2/60 cursor-pointer">
+                <div class="flex items-start gap-3">
+                  <span class="dot status-progress mt-1.5"></span>
+                  <div class="min-w-0 flex-1">
+                    <div class="flex items-center gap-2">
+                      <span class="text-xs text-blue-300 font-mono">AGV-042</span>
+                      <span class="text-xs bg-blue-400/10 text-blue-300 px-2 py-0.5 rounded">In Progress</span>
+                    </div>
+                    <div class="font-medium mt-1">Investigate buffer-to-buffer movement</div>
+                    <div class="text-xs text-muted mt-1">AGV Middleware · Updated 18 min ago</div>
+                  </div>
+                  <div class="text-xs text-muted">2h 15m</div>
+                </div>
+              </div>
+
+              <div onclick="openTask('PILOT-017')" class="px-5 py-4 hover:bg-panel2/60 cursor-pointer">
+                <div class="flex items-start gap-3">
+                  <span class="dot status-progress mt-1.5"></span>
+                  <div class="min-w-0 flex-1">
+                    <div class="flex items-center gap-2">
+                      <span class="text-xs text-blue-300 font-mono">PILOT-017</span>
+                      <span class="text-xs bg-blue-400/10 text-blue-300 px-2 py-0.5 rounded">In Progress</span>
+                    </div>
+                    <div class="font-medium mt-1">Repair glue pump pressure system</div>
+                    <div class="text-xs text-muted mt-1">Pilot Line · Updated 1h ago</div>
+                  </div>
+                  <div class="text-xs text-muted">1h 40m</div>
+                </div>
+              </div>
+
+              <div onclick="openTask('ROBOT-011')" class="px-5 py-4 hover:bg-panel2/60 cursor-pointer">
+                <div class="flex items-start gap-3">
+                  <span class="dot status-blocked mt-1.5"></span>
+                  <div class="min-w-0 flex-1">
+                    <div class="flex items-center gap-2">
+                      <span class="text-xs text-blue-300 font-mono">ROBOT-011</span>
+                      <span class="text-xs bg-red-400/10 text-red-300 px-2 py-0.5 rounded">Blocked</span>
+                    </div>
+                    <div class="font-medium mt-1">Teach speaker contour glue path</div>
+                    <div class="text-xs text-muted mt-1">Cartesian Robot · Waiting for dry-run validation</div>
+                  </div>
+                  <div class="text-xs text-muted">Yesterday</div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- PROJECT PROGRESS -->
+          <section class="col-span-4 card rounded-xl">
+            <div class="px-5 py-4 border-b border-line">
+              <h2 class="font-semibold">Project progress</h2>
+              <p class="text-xs text-muted mt-1">Overall completion</p>
+            </div>
+            <div class="p-5 space-y-6">
+              <div>
+                <div class="flex justify-between text-sm mb-2"><span>AGV Middleware</span><span class="text-muted">82%</span></div>
+                <div class="bar"><span style="width:82%"></span></div>
+              </div>
+              <div>
+                <div class="flex justify-between text-sm mb-2"><span>Pilot Line</span><span class="text-muted">67%</span></div>
+                <div class="bar"><span style="width:67%"></span></div>
+              </div>
+              <div>
+                <div class="flex justify-between text-sm mb-2"><span>Cartesian Robot</span><span class="text-muted">74%</span></div>
+                <div class="bar"><span style="width:74%"></span></div>
+              </div>
+              <div>
+                <div class="flex justify-between text-sm mb-2"><span>Plant Testing</span><span class="text-muted">38%</span></div>
+                <div class="bar"><span style="width:38%"></span></div>
+              </div>
+            </div>
+          </section>
+
+          <!-- RECENT CHANGES -->
+          <section class="col-span-8 card rounded-xl">
+            <div class="px-5 py-4 border-b border-line flex items-center">
+              <div>
+                <h2 class="font-semibold">Recent changes</h2>
+                <p class="text-xs text-muted mt-1">A permanent history of work performed</p>
+              </div>
+              <button onclick="showPage('changelog')" class="ml-auto text-xs text-blue-300">Open history →</button>
+            </div>
+            <div class="p-5 space-y-4">
+              <div class="flex gap-4">
+                <div class="w-20 text-xs text-muted">09 Sep</div>
+                <div class="w-2 h-2 rounded-full bg-emerald-400 mt-1.5"></div>
+                <div><div class="text-sm"><span class="font-mono text-blue-300">AGV-038</span> — Added backend date/time filtering</div><div class="text-xs text-muted mt-1">AGV Middleware · Feature completed</div></div>
+              </div>
+              <div class="flex gap-4">
+                <div class="w-20 text-xs text-muted">08 Sep</div>
+                <div class="w-2 h-2 rounded-full bg-emerald-400 mt-1.5"></div>
+                <div><div class="text-sm"><span class="font-mono text-blue-300">AGV-041</span> — Fixed timestamp rendering</div><div class="text-xs text-muted mt-1">AGV Middleware · Bug fix</div></div>
+              </div>
+              <div class="flex gap-4">
+                <div class="w-20 text-xs text-muted">08 Sep</div>
+                <div class="w-2 h-2 rounded-full bg-blue-400 mt-1.5"></div>
+                <div><div class="text-sm"><span class="font-mono text-blue-300">AGV-040</span> — Changed historical event state handling</div><div class="text-xs text-muted mt-1">AGV Middleware · Architecture</div></div>
+              </div>
+              <div class="flex gap-4">
+                <div class="w-20 text-xs text-muted">07 Sep</div>
+                <div class="w-2 h-2 rounded-full bg-emerald-400 mt-1.5"></div>
+                <div><div class="text-sm"><span class="font-mono text-blue-300">AGV-036</span> — Added historical event filtering</div><div class="text-xs text-muted mt-1">AGV Middleware · Feature completed</div></div>
+              </div>
+            </div>
+          </section>
+
+          <!-- QUICK LOG -->
+          <section class="col-span-4 card rounded-xl">
+            <div class="px-5 py-4 border-b border-line">
+              <h2 class="font-semibold">Quick work log</h2>
+              <p class="text-xs text-muted mt-1">Capture what you actually did</p>
+            </div>
+            <div class="p-5">
+              <textarea id="quickLog" rows="5" placeholder="What did you work on?" class="w-full bg-[#0b1120] border border-line rounded-lg p-3 text-sm resize-none outline-none focus:border-blue-400/60"></textarea>
+              <div class="flex gap-2 mt-3">
+                <select class="flex-1 bg-[#0b1120] border border-line rounded-lg px-3 py-2 text-xs">
+                  <option>AGV Middleware</option>
+                  <option>Pilot Line</option>
+                  <option>Cartesian Robot</option>
+                </select>
+                <button onclick="saveLog()" class="bg-blue-500 hover:bg-blue-400 text-slate-950 font-semibold px-4 rounded-lg text-sm">Log</button>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <!-- OTHER PAGES -->
+    <div id="page-tasks" class="page hidden flex-1 overflow-auto p-6"></div>
+    <div id="page-projects" class="page hidden flex-1 overflow-auto p-6"></div>
+    <div id="page-changelog" class="page hidden flex-1 overflow-auto p-6"></div>
+    <div id="page-worklog" class="page hidden flex-1 overflow-auto p-6"></div>
+    <div id="page-docs" class="page hidden flex-1 overflow-auto p-6"></div>
+    <div id="page-portfolio" class="page hidden flex-1 overflow-auto p-6"></div>
+  </main>
+</div>
+
+<!-- TASK MODAL -->
+<div id="taskModal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm items-center justify-center z-50">
+  <div class="w-[760px] max-w-[92vw] max-h-[90vh] overflow-auto bg-[#111827] border border-line rounded-2xl shadow-2xl">
+    <div class="px-6 py-5 border-b border-line flex items-center">
+      <div>
+        <div class="text-xs text-blue-300 font-mono">AGV-042</div>
+        <h2 class="text-xl font-semibold mt-1">Investigate buffer-to-buffer movement</h2>
+      </div>
+      <button onclick="closeModal()" class="ml-auto text-muted hover:text-white text-2xl">×</button>
+    </div>
+    <div class="p-6 grid grid-cols-3 gap-6">
+      <div class="col-span-2 space-y-6">
+        <div>
+          <div class="text-xs uppercase tracking-wider text-muted mb-2">Description</div>
+          <p class="text-sm leading-6 text-slate-300">Investigate why the AGV refuses a buffer-to-buffer movement between station 14 and station 18. Check topology, mission generation and middleware logs.</p>
+        </div>
+        <div>
+          <div class="text-xs uppercase tracking-wider text-muted mb-3">Activity</div>
+          <div class="space-y-4 border-l border-line ml-2 pl-5">
+            <div><div class="text-xs text-muted">08:41 · Status changed</div><div class="text-sm mt-1">Todo → In Progress</div></div>
+            <div><div class="text-xs text-muted">09:18 · Work log</div><div class="text-sm mt-1">Found topology mismatch between station 14 and 18.</div></div>
+            <div><div class="text-xs text-muted">10:02 · Comment</div><div class="text-sm mt-1">Topology corrected. Retesting movement.</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="space-y-5">
+        <div><div class="text-xs text-muted">Status</div><div class="mt-1 text-sm">🔵 In Progress</div></div>
+        <div><div class="text-xs text-muted">Priority</div><div class="mt-1 text-sm">High</div></div>
+        <div><div class="text-xs text-muted">Project</div><div class="mt-1 text-sm text-blue-300">AGV Middleware</div></div>
+        <div><div class="text-xs text-muted">Created</div><div class="mt-1 text-sm">08 Sep 2026</div></div>
+        <div><div class="text-xs text-muted">Time logged</div><div class="mt-1 text-sm">2h 15m</div></div>
+        <div><div class="text-xs text-muted">Related</div><div class="mt-1 space-y-1 text-sm text-blue-300"><div>AGV-038</div><div>AGV-041</div></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const pages = {
+  tasks: `
+    <div class="max-w-[1500px] mx-auto">
+      <div class="flex items-end mb-6"><div><div class="text-xs uppercase tracking-widest text-blue-300">Work queue</div><h1 class="text-3xl font-semibold mt-2">My Tasks</h1><p class="text-muted mt-1">Everything assigned to you, without the noise.</p></div><button onclick="newTask()" class="ml-auto bg-blue-500 text-slate-950 font-semibold px-4 py-2 rounded-lg">+ New task</button></div>
+      <div class="card rounded-xl overflow-hidden">
+        <div class="p-4 border-b border-line flex gap-3"><input class="bg-[#0b1120] border border-line rounded-lg px-3 py-2 text-sm flex-1" placeholder="Filter tasks..."><select class="bg-[#0b1120] border border-line rounded-lg px-3 text-sm"><option>All statuses</option><option>In Progress</option><option>Todo</option><option>Blocked</option></select></div>
+        ${taskRow("AGV-042","Investigate buffer-to-buffer movement","AGV Middleware","In Progress","High")}
+        ${taskRow("PILOT-017","Repair glue pump pressure system","Pilot Line","In Progress","High")}
+        ${taskRow("ROBOT-011","Teach speaker contour glue path","Cartesian Robot","Blocked","High")}
+        ${taskRow("AGV-038","Add backend date/time filtering","AGV Middleware","Completed","Medium")}
+        ${taskRow("AGV-041","Fix timestamp rendering","AGV Middleware","Completed","Medium")}
+        ${taskRow("TEST-006","Prepare acoustic measurement procedure","Plant Testing","Todo","Low")}
+      </div>
+    </div>`,
+  projects: `
+    <div class="max-w-[1500px] mx-auto"><div class="mb-6"><div class="text-xs uppercase tracking-widest text-blue-300">Workspace structure</div><h1 class="text-3xl font-semibold mt-2">Projects</h1><p class="text-muted mt-1">Projects contain tasks, documentation, changes and files.</p></div>
+    <div class="grid grid-cols-2 gap-5">
+      ${projectCard("AGV Middleware","AGV monitoring, middleware and operational tooling","82%","42 tasks","18 changes")}
+      ${projectCard("Pilot Line","Pilot production line recovery and automation","67%","31 tasks","24 changes")}
+      ${projectCard("Cartesian Robot","Speaker contour glue application","74%","18 tasks","11 changes")}
+      ${projectCard("Plant Testing","Acoustic measurements, labels and test procedures","38%","12 tasks","7 changes")}
+    </div></div>`,
+  changelog: `
+    <div class="max-w-[1100px] mx-auto"><div class="mb-6"><div class="text-xs uppercase tracking-widest text-blue-300">Immutable history</div><h1 class="text-3xl font-semibold mt-2">Change Log</h1><p class="text-muted mt-1">A permanent record of what changed, when and why.</p></div>
+    <div class="card rounded-xl p-6 space-y-7">
+      ${change("09 Sep 2026","AGV-038","Added backend date/time filtering","Feature completed","SQL filtering now supports date and time ranges.")}
+      ${change("08 Sep 2026","AGV-041","Fixed timestamp rendering","Bug fix","Incoming timestamps are displayed directly as YYYY-MM-DD HH:mm:ss.")}
+      ${change("08 Sep 2026","AGV-040","Changed historical event state handling","Architecture","OPC_WaitFor events now use Started rather than live Running state.")}
+      ${change("07 Sep 2026","AGV-036","Added historical event filtering","Feature completed","History page now filters events by date and time.")}
+    </div></div>`,
+  worklog: `
+    <div class="max-w-[1100px] mx-auto"><div class="mb-6"><div class="text-xs uppercase tracking-widest text-blue-300">Engineering journal</div><h1 class="text-3xl font-semibold mt-2">Work Log</h1><p class="text-muted mt-1">Record the work that does not fit neatly into a task.</p></div>
+    <div class="card rounded-xl p-5 mb-5"><textarea rows="4" class="w-full bg-[#0b1120] border border-line rounded-lg p-3 text-sm" placeholder="Describe what you worked on, what you found and what the result was..."></textarea><div class="flex justify-end mt-3"><button class="bg-blue-500 text-slate-950 font-semibold px-4 py-2 rounded-lg">Add work log</button></div></div>
+    <div class="space-y-4">${log("Today · 09:18","AGV Middleware","2h 15m","Investigated buffer-to-buffer movement. Found topology mismatch between station 14 and station 18. Corrected topology and started retest.")}${log("Today · 07:42","Pilot Line","1h 40m","Disassembled glue pump assembly and inspected pressure regulation. Identified regulator issue.")}${log("09 Sep · 15:20","AGV Middleware","45m","Tested new backend time filter against MSSQL Log table.")}</div></div>`,
+  docs: `
+    <div class="max-w-[1200px] mx-auto"><div class="mb-6"><div class="text-xs uppercase tracking-widest text-blue-300">Knowledge base</div><h1 class="text-3xl font-semibold mt-2">Documentation</h1><p class="text-muted mt-1">Keep the knowledge with the project instead of in your head.</p></div>
+    <div class="grid grid-cols-3 gap-4">${doc("AGV Middleware Architecture","System overview, WebSockets, Node-RED and MSSQL")}${doc("AGV History Event Model","Historical states, logging rules and filtering")}${doc("Pilot Line Recovery","Known issues, repairs and station documentation")}${doc("Cartesian Robot Setup","Dry-run procedure and glue path teaching")}${doc("Plant Test Procedure","Acoustic measurement and label workflow")}${doc("Troubleshooting","Common faults and proven fixes")}</div></div>`,
+  portfolio: `
+    <div class="max-w-[1200px] mx-auto"><div class="mb-7"><div class="text-xs uppercase tracking-widest text-blue-300">Proof of work</div><h1 class="text-3xl font-semibold mt-2">Portfolio</h1><p class="text-muted mt-1">A clean, presentable view of completed engineering work.</p></div>
+    <div class="card rounded-xl p-6 mb-5"><div class="flex justify-between"><div><div class="text-xl font-semibold">Engineering Work Overview</div><div class="text-sm text-muted mt-1">A summary generated from your actual project history.</div></div><button class="border border-line px-3 py-2 rounded-lg text-sm">Export report</button></div><div class="grid grid-cols-3 gap-6 mt-7"><div><div class="text-3xl font-semibold">127</div><div class="text-xs text-muted">Completed tasks</div></div><div><div class="text-3xl font-semibold">34</div><div class="text-xs text-muted">Features / improvements</div></div><div><div class="text-3xl font-semibold">18</div><div class="text-xs text-muted">Bug fixes</div></div></div></div>
+    <div class="grid grid-cols-2 gap-5">${projectCard("AGV Middleware","Operational tooling and AGV middleware","82%","42 completed","18 changes")}${projectCard("Pilot Line","Automation recovery and maintenance","67%","31 completed","24 changes")}</div></div>`
+};
+
+function taskRow(id,title,project,status,priority){
+  const cls=status==="Completed"?"status-done":status==="Blocked"?"status-blocked":status==="In Progress"?"status-progress":"status-todo";
+  return `<div onclick="openTask('${id}')" class="px-5 py-4 border-b border-line hover:bg-panel2/60 cursor-pointer flex items-center gap-4"><span class="dot ${cls}"></span><div class="w-24 text-xs font-mono text-blue-300">${id}</div><div class="flex-1"><div class="text-sm font-medium">${title}</div><div class="text-xs text-muted mt-1">${project}</div></div><div class="text-xs text-muted w-24">${priority}</div><div class="text-xs w-24">${status}</div></div>`;
+}
+function projectCard(name,desc,pct,a,b){ return `<div class="card rounded-xl p-5 hover:border-slate-500 transition"><div class="flex items-start"><div class="w-10 h-10 rounded-lg bg-blue-400/10 border border-blue-400/20 flex items-center justify-center text-blue-300">▣</div><button class="ml-auto text-muted">•••</button></div><h3 class="font-semibold mt-4">${name}</h3><p class="text-sm text-muted mt-1 h-10">${desc}</p><div class="flex justify-between text-xs mt-5 mb-2"><span>Progress</span><span>${pct}</span></div><div class="bar"><span style="width:${pct}"></span></div><div class="flex gap-5 mt-4 text-xs text-muted"><span>${a}</span><span>${b}</span></div></div>`; }
+function change(date,id,title,type,desc){ return `<div class="flex gap-5"><div class="w-24 text-xs text-muted pt-1">${date}</div><div class="w-2 h-2 rounded-full bg-blue-400 mt-2"></div><div><div class="text-xs font-mono text-blue-300">${id}</div><div class="font-medium mt-1">${title}</div><div class="text-xs text-muted mt-1">${type} · ${desc}</div></div></div>`; }
+function log(date,project,time,text){ return `<div class="card rounded-xl p-5"><div class="flex justify-between"><div><span class="text-xs text-blue-300">${project}</span><span class="text-xs text-muted ml-3">${date}</span></div><span class="text-xs text-muted">${time}</span></div><p class="text-sm text-slate-300 leading-6 mt-3">${text}</p></div>`; }
+function doc(name,desc){ return `<div class="card rounded-xl p-5 hover:bg-panel2/60 cursor-pointer"><div class="text-blue-300 text-xl">▤</div><div class="font-medium mt-4">${name}</div><div class="text-xs text-muted mt-1 leading-5">${desc}</div><div class="text-xs text-slate-500 mt-4">Updated recently →</div></div>`; }
+
+function showPage(name, btn){
+  document.querySelectorAll('.page').forEach(p=>p.classList.add('hidden'));
+  if(name === 'dashboard') document.getElementById('page-dashboard').classList.remove('hidden');
+  else { const el=document.getElementById('page-'+name); el.innerHTML=pages[name]; el.classList.remove('hidden'); }
+  document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('nav-active'));
+  if(btn) btn.classList.add('nav-active');
+}
+function openTask(id){ document.getElementById('taskModal').classList.remove('hidden'); document.getElementById('taskModal').classList.add('flex'); }
+function closeModal(){ document.getElementById('taskModal').classList.add('hidden'); document.getElementById('taskModal').classList.remove('flex'); }
+function newTask(){ alert('V1 concept: open a New Task form here.'); }
+function saveLog(){ const el=document.getElementById('quickLog'); if(el && el.value.trim()){ alert('Work log saved (demo).'); el.value=''; } }
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeModal(); });
+</script>
+</body>
+</html>

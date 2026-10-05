@@ -1,0 +1,264 @@
+use std::process::Command;
+
+use serde::Serialize;
+use tauri::AppHandle;
+
+use super::super::error::AppError;
+
+pub const REPO_OWNER: &str = "Evandriasa";
+pub const REPO_NAME: &str = "Ducktrack";
+pub const REPO_URL: &str = "https://github.com/Evandriasa/Ducktrack";
+const RELEASES_URL: &str = "https://github.com/Evandriasa/Ducktrack/releases";
+const API_LATEST: &str = "https://api.github.com/repos/Evandriasa/Ducktrack/releases/latest";
+const API_LIST: &str = "https://api.github.com/repos/Evandriasa/Ducktrack/releases?per_page=5";
+
+const USER_AGENT: &str = concat!("DuckTrack/", env!("CARGO_PKG_VERSION"));
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateInfo {
+    pub current: String,
+    pub latest: Option<String>,
+    pub update_available: bool,
+    pub repo_url: String,
+    pub releases_url: String,
+    pub release_url: Option<String>,
+    pub published_at: Option<String>,
+    pub notes: Option<String>,
+    pub release_found: bool,
+    pub message: String,
+}
+
+fn parse_version(v: &str) -> Vec<u64> {
+    v.trim()
+        .trim_start_matches(['v', 'V'])
+        .split(['.', '-', '+', ' '])
+        .filter(|part| part.starts_with(|c: char| c.is_ascii_digit()))
+        .map(|part| {
+            part.chars()
+                .take_while(|c| c.is_ascii_digit())
+                .collect::<String>()
+                .parse::<u64>()
+                .unwrap_or(0)
+        })
+        .collect()
+}
+
+fn is_newer(latest: &str, current: &str) -> bool {
+    let l = parse_version(latest);
+    let c = parse_version(current);
+    for i in 0..l.len().max(c.len()) {
+        let lv = l.get(i).copied().unwrap_or(0);
+        let cv = c.get(i).copied().unwrap_or(0);
+        if lv != cv {
+            return lv > cv;
+        }
+    }
+    false
+}
+
+fn http_get_json(url: &str) -> Result<(u16, serde_json::Value), String> {
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(std::time::Duration::from_secs(12)))
+        .https_only(true)
+        // Inspect 4xx ourselves so a missing release falls through to the list endpoint.
+        .http_status_as_error(false)
+        .build()
+        .into();
+    let mut response = agent
+        .get(url)
+        .header("User-Agent", USER_AGENT)
+        .header("Accept", "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        .call()
+        .map_err(|e| e.to_string())?;
+    let status = response.status().as_u16();
+    let body = response.body_mut().read_to_string().map_err(|e| e.to_string())?;
+    let value = serde_json::from_str(&body).unwrap_or(serde_json::Value::Null);
+    Ok((status, value))
+}
+
+fn fetch_release() -> Result<Option<serde_json::Value>, String> {
+    match http_get_json(API_LATEST) {
+        Ok((200, value)) => Ok(Some(value)),
+        Ok((404, _)) => {
+            // No "latest" release yet: fall back to the newest published one.
+            let (list_status, value) = http_get_json(API_LIST)?;
+            if list_status == 404 {
+                // Repository not visible (private or not created yet).
+                return Ok(None);
+            }
+            if list_status != 200 {
+                return Err(format!("GitHub returned HTTP {list_status}."));
+            }
+            let items = value.as_array().cloned().unwrap_or_default();
+            let published = items
+                .iter()
+                .find(|r| r.get("draft").and_then(|d| d.as_bool()) == Some(false))
+                .cloned()
+                .or_else(|| items.first().cloned());
+            Ok(published)
+        }
+        Ok((status, _)) => Err(format!("GitHub returned HTTP {status}.")),
+        Err(e) => Err(e),
+    }
+}
+
+fn summarize(json: &serde_json::Value) -> Option<String> {
+    json.get("body")
+        .and_then(|b| b.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            // Keep the banner short; the full notes live on the release page.
+            if s.chars().count() > 400 {
+                let cut: String = s.chars().take(400).collect();
+                format!("{cut}…")
+            } else {
+                s
+            }
+        })
+}
+
+/// Compare the running version against the newest GitHub release.
+#[tauri::command]
+pub async fn check_for_updates(app: AppHandle) -> Result<UpdateInfo, AppError> {
+    let current = app.package_info().version.to_string();
+    let releases_url = RELEASES_URL.to_string();
+
+    let fetched = tauri::async_runtime::spawn_blocking(move || fetch_release())
+        .await
+        .map_err(|e| AppError::Other(format!("Update check failed: {e}")))?;
+
+    let release = match fetched {
+        Ok(r) => r,
+        Err(e) => {
+            return Ok(UpdateInfo {
+                current,
+                latest: None,
+                update_available: false,
+                repo_url: REPO_URL.to_string(),
+                releases_url,
+                release_url: None,
+                published_at: None,
+                notes: None,
+                release_found: false,
+                message: format!("Could not reach GitHub: {e}"),
+            })
+        }
+    };
+
+    let Some(release) = release else {
+        return Ok(UpdateInfo {
+            current,
+            latest: None,
+            update_available: false,
+            repo_url: REPO_URL.to_string(),
+            releases_url,
+            release_url: None,
+            published_at: None,
+            notes: None,
+            release_found: false,
+            message: "No published releases found on GitHub yet.".to_string(),
+        });
+    };
+
+    let latest = release
+        .get("tag_name")
+        .and_then(|t| t.as_str())
+        .map(|s| s.trim_start_matches(['v', 'V']).to_string());
+    let update_available = latest
+        .as_ref()
+        .map(|l| is_newer(l, &current))
+        .unwrap_or(false);
+    let message = match latest.as_ref() {
+        Some(l) if update_available => format!("Version {l} is available — you have {current}."),
+        Some(_) => format!("DuckTrack {current} is up to date."),
+        None => "No published releases found on GitHub yet.".to_string(),
+    };
+
+    Ok(UpdateInfo {
+        current,
+        latest,
+        update_available,
+        repo_url: REPO_URL.to_string(),
+        releases_url,
+        release_url: release
+            .get("html_url")
+            .and_then(|u| u.as_str())
+            .map(|s| s.to_string()),
+        published_at: release
+            .get("published_at")
+            .and_then(|d| d.as_str())
+            .map(|s| s.to_string()),
+        notes: summarize(&release),
+        release_found: true,
+        message,
+    })
+}
+
+/// Open a DuckTrack GitHub page in the system browser.
+#[tauri::command]
+pub fn open_github_page(page: Option<String>) -> Result<(), AppError> {
+    let url = match page.as_deref() {
+        None | Some("") | Some("repo") => REPO_URL.to_string(),
+        Some("releases") => RELEASES_URL.to_string(),
+        Some(_) => {
+            return Err(AppError::Validation(
+                "Only the repository or releases page can be opened.".into(),
+            ))
+        }
+    };
+    open_url_in_browser(&url)
+}
+
+fn open_url_in_browser(url: &str) -> Result<(), AppError> {
+    // Only ever open trusted GitHub URLs through the OS handler.
+    if !(url.starts_with("https://github.com/") || url == REPO_URL) {
+        return Err(AppError::Validation("Refusing to open untrusted URL.".into()));
+    }
+
+    #[cfg(target_os = "macos")]
+    let mut cmd = {
+        let mut c = Command::new("open");
+        c.arg(url);
+        c
+    };
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        let mut c = Command::new("cmd");
+        c.arg("/C").arg("start").arg("").arg(url);
+        c
+    };
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let mut cmd = {
+        let mut c = Command::new("xdg-open");
+        c.arg(url);
+        c
+    };
+
+    cmd.spawn()
+        .map_err(|e| AppError::Other(format!("Could not open browser: {e}")))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_versions() {
+        assert_eq!(parse_version("v1.2.3"), vec![1, 2, 3]);
+        assert_eq!(parse_version("0.1.0"), vec![0, 1, 0]);
+        assert_eq!(parse_version("1.2.3-beta.1"), vec![1, 2, 3, 1]);
+    }
+
+    #[test]
+    fn detects_newer() {
+        assert!(is_newer("0.2.0", "0.1.0"));
+        assert!(is_newer("1.0.0", "0.9.9"));
+        assert!(!is_newer("0.1.0", "0.1.0"));
+        assert!(!is_newer("0.1.0", "0.2.0"));
+        assert!(!is_newer("v0.1", "0.1.0"));
+    }
+}

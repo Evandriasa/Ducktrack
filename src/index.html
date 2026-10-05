@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DuckTrack — Engineering Workspace</title>
+    <!-- EMBEDMARKER-v1 -->
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body class="grid-bg">
+<div class="titlebar" id="titlebar">
+  <div class="tb-brand">
+    <span class="tb-dot"></span>
+    <span class="tb-title">DuckTrack</span>
+    <span class="tb-sub">Engineering Workspace</span>
+  </div>
+  <div class="tb-spacer"></div>
+  <button id="win-min" class="win-btn" title="Minimize" aria-label="Minimize">&#8211;</button>
+  <button id="win-max" class="win-btn" title="Maximize" aria-label="Maximize">&#9633;</button>
+  <button id="win-close" class="win-btn win-close" title="Close" aria-label="Close">&#10005;</button>
+</div>
+<div class="shell">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-logo">D</div>
+      <div>
+        <div class="brand-title">DuckTrack</div>
+        <div class="brand-sub">Engineering Workspace</div>
+      </div>
+    </div>
+    <div class="sidebar-scroll">
+      <button id="btn-new-task" class="btn-newtask"><span>+</span> New task</button>
+      <nav id="nav"></nav>
+    </div>
+    <div class="sidebar-foot">
+      <div class="avatar" id="sidebar-avatar">?</div>
+      <div>
+        <div class="who" id="sidebar-user">…</div>
+        <div class="xs muted">Local user</div>
+      </div>
+      <button class="foot-logout" id="btn-logout" title="Sign out">&#8678;</button>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main">
+    <header class="header">
+      <div class="breadcrumb" id="breadcrumb"></div>
+      <div class="search-wrap">
+        <span class="search-icon">&#8981;</span>
+        <input id="search-input" class="search-input" placeholder="Search tasks, projects, changes...">
+        <span class="kbd" style="position:absolute;right:10px;top:50%;transform:translateY(-50%)">Ctrl K</span>
+      </div>
+      <div id="timer-widget" class="timer-widget hidden" title="Active timer"></div>
+      <button class="ghost-btn" title="Reload workspace" id="btn-reload">&#8635;</button>
+    </header>
+    <div class="content" id="content"></div>
+  </main>
+</div>
+
+<!-- LOGIN OVERLAY -->
+<div id="login-screen" class="modal-backdrop">
+  <div class="modal login-card" style="width:380px">
+    <div class="modal-head">
+      <h2 id="login-title">Sign in</h2>
+    </div>
+    <div class="modal-body">
+      <div id="login-view-form">
+        <label class="field-label">User</label>
+        <select id="login-user" class="select"></select>
+        <label class="field-label mt-2">Password</label>
+        <input id="login-password" type="password" class="input" placeholder="Password">
+        <button id="btn-login" class="btn-primary block mt-3">Sign in</button>
+        <div id="login-error" class="form-error mt-2"></div>
+      </div>
+      <div id="login-view-setup" class="hidden">
+        <p class="muted">No user accounts yet. Create the first user to get started.</p>
+        <label class="field-label">Name</label>
+        <input id="setup-name" type="text" class="input" placeholder="e.g. Ada">
+        <label class="field-label mt-2">Password</label>
+        <input id="setup-password" type="password" class="input" placeholder="Password">
+        <button id="btn-setup" class="btn-primary block mt-3">Create account</button>
+        <div id="setup-error" class="form-error mt-2"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- TASK MODAL -->
+<div id="task-modal" class="modal-backdrop hidden"></div>
+
+<!-- PROJECT MODAL -->
+<div id="project-modal" class="modal-backdrop hidden"></div>
+
+<!-- SEARCH MODAL -->
+<div id="search-modal" class="modal-backdrop hidden">
+  <div class="modal" style="width:680px">
+    <div class="modal-head">
+      <h2>Search DuckTrack</h2>
+      <button class="modal-close" data-close="search-modal">&times;</button>
+    </div>
+    <div class="modal-body">
+      <input id="search-query" class="input" placeholder="Type to search everything..." autofocus>
+      <div id="search-results" class="mt-3"></div>
+    </div>
+  </div>
+</div>
+
+<!-- PALETTE MODAL -->
+<div id="palette-modal" class="modal-backdrop hidden">
+  <div class="modal" style="width:620px">
+    <div class="modal-head">
+      <h2>Quick actions</h2>
+      <button class="modal-close" data-close="palette-modal">&times;</button>
+    </div>
+    <div class="modal-body">
+      <input id="palette-input" class="input" placeholder="Type to filter actions, or a task key (e.g. AGV-001)..." autofocus>
+      <div id="palette-results" class="mt-3"></div>
+      <div class="xs muted mt-3">Enter runs the highlighted action · Esc closes</div>
+    </div>
+  </div>
+</div>
+
+<!-- SETTINGS MODAL -->
+<div id="settings-modal" class="modal-backdrop hidden"></div>
+
+<!-- FIVE-WHY MODALS -->
+<div id="fivewhy-modal" class="modal-backdrop hidden"></div>
+<div id="fivewhy-task-modal" class="modal-backdrop hidden"></div>
+
+<!-- CONFIRM DIALOG -->
+<div id="confirm-modal" class="modal-backdrop hidden"></div>
+
+<!-- IMAGE LIGHTBOX -->
+<div id="image-viewer" class="modal-backdrop hidden"></div>
+
+<div class="toast-wrap" id="toasts"></div>
+
+<script>
+window.__dtProbe = function (msg) {
+  try {
+    var line = "[" + new Date().toISOString() + "] " + msg + "\n";
+    var fs = window.__TAURI__ && window.__TAURI__.fs;
+    var base = window.__TAURI__ && window.__TAURI__.path;
+    if (fs && base) {
+      base.appDataDir().then(function (d) {
+        fs.writeTextFile(d + "debug.txt", line, { append: true });
+      });
+    }
+  } catch (e) {}
+};
+window.addEventListener("error", function (ev) {
+  window.__dtProbe("window.onerror: " + (ev.message || "") + " @ " + (ev.filename || "") + ":" + (ev.lineno || ""));
+});
+window.addEventListener("unhandledrejection", function (ev) {
+  window.__dtProbe("unhandledrejection: " + String((ev.reason && ev.reason.message) || ev.reason));
+});
+</script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
