@@ -29,14 +29,25 @@ pub struct UpdateInfo {
     pub message: String,
 }
 
+/// Extract the numeric core of a version tag, e.g. "v1.2.3", "release-2.0" or
+/// "ducktrack-v3.0.0-beta.4" all yield a comparable numeric vector.
+///
+/// Any leading text is skipped, and pre-release / build metadata (`-beta.4`,
+/// `+build`) is ignored so that "1.2.3-beta.1" ranks equal to "1.2.3" and users
+/// are never pushed onto a pre-release.
 fn parse_version(v: &str) -> Vec<u64> {
-    v.trim()
-        .trim_start_matches(['v', 'V'])
-        .split(['.', '-', '+', ' '])
-        .filter(|part| part.starts_with(|c: char| c.is_ascii_digit()))
+    let core = v.trim();
+    let Some(first_digit) = core.find(|c: char| c.is_ascii_digit()) else {
+        return Vec::new();
+    };
+    core[first_digit..]
+        .split(['-', '+', ' '])
+        .next()
+        .unwrap_or("")
+        .split('.')
         .map(|part| {
             part.chars()
-                .take_while(|c| c.is_ascii_digit())
+                .take_while(|c: &char| c.is_ascii_digit())
                 .collect::<String>()
                 .parse::<u64>()
                 .unwrap_or(0)
@@ -92,10 +103,19 @@ fn fetch_release() -> Result<Option<serde_json::Value>, String> {
                 return Err(format!("GitHub returned HTTP {list_status}."));
             }
             let items = value.as_array().cloned().unwrap_or_default();
+            // Prefer a real published release; never surface a pre-release or a
+            // draft as an installable update.
+            let is_draft = |r: &&serde_json::Value| {
+                r.get("draft").and_then(|d| d.as_bool()) == Some(true)
+            };
+            let is_pre = |r: &&serde_json::Value| {
+                r.get("prerelease").and_then(|d| d.as_bool()) == Some(true)
+            };
             let published = items
                 .iter()
-                .find(|r| r.get("draft").and_then(|d| d.as_bool()) == Some(false))
+                .find(|r| !is_draft(r) && !is_pre(r))
                 .cloned()
+                .or_else(|| items.iter().find(|r| !is_draft(r)).cloned())
                 .or_else(|| items.first().cloned());
             Ok(published)
         }
@@ -250,7 +270,17 @@ mod tests {
     fn parses_versions() {
         assert_eq!(parse_version("v1.2.3"), vec![1, 2, 3]);
         assert_eq!(parse_version("0.1.0"), vec![0, 1, 0]);
-        assert_eq!(parse_version("1.2.3-beta.1"), vec![1, 2, 3, 1]);
+        assert_eq!(parse_version("V2.0"), vec![2, 0]);
+        // Pre-release / build metadata is not part of the comparable core.
+        assert_eq!(parse_version("1.2.3-beta.1"), vec![1, 2, 3]);
+        assert_eq!(parse_version("1.2.3+build.7"), vec![1, 2, 3]);
+        // Real-world GitHub tags seen in the wild: a text prefix must not eat
+        // the major version number.
+        assert_eq!(parse_version("tauri-v3.0.0-alpha.4"), vec![3, 0, 0]);
+        assert_eq!(parse_version("ducktrack-v0.2.0"), vec![0, 2, 0]);
+        assert_eq!(parse_version("release-2.0"), vec![2, 0]);
+        // No digits at all must not panic.
+        assert!(parse_version("nightly").is_empty());
     }
 
     #[test]
@@ -260,5 +290,12 @@ mod tests {
         assert!(!is_newer("0.1.0", "0.1.0"));
         assert!(!is_newer("0.1.0", "0.2.0"));
         assert!(!is_newer("v0.1", "0.1.0"));
+        // Numeric, not lexical, ordering.
+        assert!(is_newer("0.10.0", "0.9.0"));
+        // Prefixed tags must still compare correctly.
+        assert!(is_newer("tauri-v3.0.0-alpha.4", "0.1.0"));
+        assert!(!is_newer("ducktrack-v0.1.0", "0.1.0"));
+        // A pre-release is never an upgrade over the same base version.
+        assert!(!is_newer("1.2.3-beta.1", "1.2.3"));
     }
 }
