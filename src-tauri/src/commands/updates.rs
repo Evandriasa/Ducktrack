@@ -140,47 +140,40 @@ fn summarize(json: &serde_json::Value) -> Option<String> {
         })
 }
 
-/// Compare the running version against the newest GitHub release.
-#[tauri::command]
-pub async fn check_for_updates(app: AppHandle) -> Result<UpdateInfo, AppError> {
-    let current = app.package_info().version.to_string();
-    let releases_url = RELEASES_URL.to_string();
-
-    let fetched = tauri::async_runtime::spawn_blocking(move || fetch_release())
-        .await
-        .map_err(|e| AppError::Other(format!("Update check failed: {e}")))?;
-
-    let release = match fetched {
-        Ok(r) => r,
-        Err(e) => {
-            return Ok(UpdateInfo {
-                current,
-                latest: None,
-                update_available: false,
-                repo_url: REPO_URL.to_string(),
-                releases_url,
-                release_url: None,
-                published_at: None,
-                notes: None,
-                release_found: false,
-                message: format!("Could not reach GitHub: {e}"),
-            })
-        }
+/// Turn a fetched release (or a fetch failure) into user-facing update info.
+///
+/// Kept free of Tauri types so the decision logic can be tested offline.
+fn build_info(
+    current: String,
+    fetched: Result<Option<serde_json::Value>, String>,
+) -> UpdateInfo {
+    let base = UpdateInfo {
+        current: current.clone(),
+        latest: None,
+        update_available: false,
+        repo_url: REPO_URL.to_string(),
+        releases_url: RELEASES_URL.to_string(),
+        release_url: None,
+        published_at: None,
+        notes: None,
+        release_found: false,
+        message: String::new(),
     };
 
-    let Some(release) = release else {
-        return Ok(UpdateInfo {
-            current,
-            latest: None,
-            update_available: false,
-            repo_url: REPO_URL.to_string(),
-            releases_url,
-            release_url: None,
-            published_at: None,
-            notes: None,
-            release_found: false,
-            message: "No published releases found on GitHub yet.".to_string(),
-        });
+    let release = match fetched {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            return UpdateInfo {
+                message: "No published releases found on GitHub yet.".to_string(),
+                ..base
+            }
+        }
+        Err(e) => {
+            return UpdateInfo {
+                message: format!("Could not reach GitHub: {e}"),
+                ..base
+            }
+        }
     };
 
     let latest = release
@@ -197,12 +190,11 @@ pub async fn check_for_updates(app: AppHandle) -> Result<UpdateInfo, AppError> {
         None => "No published releases found on GitHub yet.".to_string(),
     };
 
-    Ok(UpdateInfo {
-        current,
+    UpdateInfo {
         latest,
         update_available,
-        repo_url: REPO_URL.to_string(),
-        releases_url,
+        release_found: true,
+        message,
         release_url: release
             .get("html_url")
             .and_then(|u| u.as_str())
@@ -212,9 +204,20 @@ pub async fn check_for_updates(app: AppHandle) -> Result<UpdateInfo, AppError> {
             .and_then(|d| d.as_str())
             .map(|s| s.to_string()),
         notes: summarize(&release),
-        release_found: true,
-        message,
-    })
+        ..base
+    }
+}
+
+/// Compare the running version against the newest GitHub release.
+#[tauri::command]
+pub async fn check_for_updates(app: AppHandle) -> Result<UpdateInfo, AppError> {
+    let current = app.package_info().version.to_string();
+
+    let fetched = tauri::async_runtime::spawn_blocking(move || fetch_release())
+        .await
+        .map_err(|e| AppError::Other(format!("Update check failed: {e}")))?;
+
+    Ok(build_info(current, fetched))
 }
 
 /// Open a DuckTrack GitHub page in the system browser.
@@ -297,5 +300,93 @@ mod tests {
         assert!(!is_newer("ducktrack-v0.1.0", "0.1.0"));
         // A pre-release is never an upgrade over the same base version.
         assert!(!is_newer("1.2.3-beta.1", "1.2.3"));
+    }
+
+    fn release_json(tag: &str, body: &str) -> serde_json::Value {
+        serde_json::json!({
+            "tag_name": tag,
+            "html_url": format!("https://github.com/{REPO_OWNER}/{REPO_NAME}/releases/tag/{tag}"),
+            "published_at": "2026-01-15T10:00:00Z",
+            "draft": false,
+            "prerelease": false,
+            "body": body,
+        })
+    }
+
+    #[test]
+    fn reports_update_available() {
+        let info = build_info(
+            "0.1.0".to_string(),
+            Ok(Some(release_json("v0.2.0", "Adds the update checker."))),
+        );
+        assert!(info.release_found);
+        assert!(info.update_available);
+        assert_eq!(info.latest.as_deref(), Some("0.2.0"));
+        assert_eq!(info.message, "Version 0.2.0 is available — you have 0.1.0.");
+        assert_eq!(info.notes.as_deref(), Some("Adds the update checker."));
+        assert!(info
+            .release_url
+            .as_deref()
+            .unwrap()
+            .ends_with("/releases/tag/v0.2.0"));
+        assert_eq!(info.published_at.as_deref(), Some("2026-01-15T10:00:00Z"));
+    }
+
+    #[test]
+    fn reports_up_to_date_when_tags_match() {
+        let info = build_info("0.2.0".to_string(), Ok(Some(release_json("v0.2.0", "notes"))));
+        assert!(info.release_found);
+        assert!(!info.update_available);
+        assert_eq!(info.message, "DuckTrack 0.2.0 is up to date.");
+    }
+
+    #[test]
+    fn reports_no_releases_and_errors_distinctly() {
+        let none = build_info("0.2.0".to_string(), Ok(None));
+        assert!(!none.release_found);
+        assert!(!none.update_available);
+        assert_eq!(none.message, "No published releases found on GitHub yet.");
+
+        let failed = build_info("0.2.0".to_string(), Err("GitHub returned HTTP 403.".into()));
+        assert!(!failed.release_found);
+        assert_eq!(
+            failed.message,
+            "Could not reach GitHub: GitHub returned HTTP 403."
+        );
+    }
+
+    #[test]
+    fn truncates_long_release_notes() {
+        let long = "x".repeat(900);
+        let info = build_info("0.1.0".to_string(), Ok(Some(release_json("v0.2.0", &long))));
+        let notes = info.notes.unwrap();
+        assert_eq!(notes.chars().count(), 401); // 400 + ellipsis
+        assert!(notes.ends_with('\u{2026}'));
+    }
+
+    #[test]
+    fn empty_release_body_yields_no_notes() {
+        let info = build_info("0.1.0".to_string(), Ok(Some(release_json("v0.2.0", "   "))));
+        assert!(info.notes.is_none());
+        assert!(info.update_available);
+    }
+
+    /// Live check against the real GitHub API. Ignored by default so CI stays
+    /// offline-safe; run with: cargo test -- --ignored --nocapture
+    #[test]
+    #[ignore = "hits the network"]
+    fn live_github_check() {
+        let fetched = fetch_release();
+        match &fetched {
+            Ok(Some(_)) => {}
+            other => println!("live check: no release yet -> {other:?}"),
+        }
+        for current in ["0.1.0", "0.2.0"] {
+            let info = build_info(current.to_string(), fetched.clone());
+            println!(
+                "live: current={current} latest={:?} update_available={} message={}",
+                info.latest, info.update_available, info.message
+            );
+        }
     }
 }
