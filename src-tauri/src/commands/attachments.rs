@@ -9,6 +9,7 @@ use super::super::database::{indexer, now, AppState};
 use super::super::error::{ensure_non_empty, AppError};
 
 static MIME_TO_EXT: &[(&str, &str)] = &[
+    // images
     ("image/png", "png"),
     ("image/jpeg", "jpg"),
     ("image/gif", "gif"),
@@ -16,7 +17,25 @@ static MIME_TO_EXT: &[(&str, &str)] = &[
     ("image/svg+xml", "svg"),
     ("image/bmp", "bmp"),
     ("image/x-icon", "ico"),
+    // documents / plain files
+    ("text/plain", "txt"),
+    ("text/markdown", "md"),
+    ("text/csv", "csv"),
+    ("text/html", "html"),
+    ("application/json", "json"),
+    ("application/pdf", "pdf"),
+    ("application/zip", "zip"),
+    ("application/xml", "xml"),
+    ("application/msword", "doc"),
+    ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx"),
+    ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx"),
+    ("application/vnd.ms-excel", "xls"),
+    ("text/tab-separated-values", "tsv"),
+    ("application/rtf", "rtf"),
 ];
+
+/// MIME type used when we have neither a stored MIME nor a recognised extension.
+const FALLBACK_MIME: &str = "application/octet-stream";
 
 fn ext_for_mime(mime: &str) -> &str {
     MIME_TO_EXT
@@ -33,6 +52,19 @@ fn mime_for_filename(filename: &str) -> Option<String> {
         .find(|(_, e)| *e == ext)
         .map(|(m, _)| (*m).to_string())
 }
+
+/// Best-effort MIME for a stored file: stored value, then extension, then
+/// a generic binary type so we never label a PDF as `image/png`.
+fn resolve_mime(mime: Option<String>, filename: &str) -> String {
+    mime.filter(|m| !m.is_empty())
+        .or_else(|| mime_for_filename(filename))
+        .unwrap_or_else(|| FALLBACK_MIME.to_string())
+}
+
+fn is_image_mime(mime: &str) -> bool {
+    mime.starts_with("image/")
+}
+
 
 fn filename_for(label: &str, mime: Option<&str>, roll: i64) -> String {
     let ext = mime.map(ext_for_mime).unwrap_or("png");
@@ -52,6 +84,7 @@ pub struct Attachment {
     pub size: i64,
     pub mime: Option<String>,
     pub created_at: String,
+    pub five_why_id: Option<i64>,
 }
 
 fn attachment_from_row(row: &Row) -> rusqlite::Result<Attachment> {
@@ -64,7 +97,56 @@ fn attachment_from_row(row: &Row) -> rusqlite::Result<Attachment> {
         size: row.get(5)?,
         mime: row.get(6)?,
         created_at: row.get(7)?,
+        five_why_id: row.get(8)?,
     })
+}
+
+/// Column list used by every attachments SELECT; ##9 maps five_why_id.
+const ATTACH_COLS: &str = "a.id, a.task_id, a.project_id, a.filename, a.path, a.size, a.mime, a.created_at, a.five_why_id";
+
+/// Verify the active user owns the referenced task / project / 5-Why before
+/// attaching evidence to it.
+fn verify_owner(
+    tx: &rusqlite::Transaction,
+    uid: i64,
+    task_id: Option<i64>,
+    project_id: Option<i64>,
+    five_why_id: Option<i64>,
+) -> Result<(), AppError> {
+    if let Some(tid) = task_id {
+        let owned: bool = tx.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM tasks t JOIN projects p ON p.id = t.project_id
+                WHERE t.id = ?1 AND p.user_id = ?2
+            )",
+            params![tid, uid],
+            |r| r.get(0),
+        )?;
+        if !owned {
+            return Err(AppError::NotFound(format!("Task {tid} not found.")));
+        }
+    }
+    if let Some(pid) = project_id {
+        let owned: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM projects WHERE id = ?1 AND user_id = ?2)",
+            params![pid, uid],
+            |r| r.get(0),
+        )?;
+        if !owned {
+            return Err(AppError::NotFound(format!("Project {pid} not found.")));
+        }
+    }
+    if let Some(fwid) = five_why_id {
+        let owned: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM five_whys WHERE id = ?1 AND user_id = ?2)",
+            params![fwid, uid],
+            |r| r.get(0),
+        )?;
+        if !owned {
+            return Err(AppError::NotFound(format!("5-Why analysis {fwid} not found.")));
+        }
+    }
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -73,6 +155,7 @@ pub struct ImageInput {
     pub data_url: String,
     pub task_id: Option<i64>,
     pub project_id: Option<i64>,
+    pub five_why_id: Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -81,6 +164,7 @@ pub struct AttachmentCtx {
     pub id: i64,
     pub task_id: Option<i64>,
     pub project_id: Option<i64>,
+    pub five_why_id: Option<i64>,
     pub user_id: i64,
 }
 
@@ -108,46 +192,23 @@ pub fn add_image_data(
 
     let mut db = state.db.lock().map_err(|_| AppError::Other("db lock poisoned".into()))?;
     let tx = db.transaction()?;
+    verify_owner(&tx, uid, input.task_id, input.project_id, input.five_why_id)?;
 
-    if let Some(tid) = input.task_id {
-        let owned: bool = tx.query_row(
-            "SELECT EXISTS(
-                SELECT 1 FROM tasks t JOIN projects p ON p.id = t.project_id
-                WHERE t.id = ?1 AND p.user_id = ?2
-            )",
-            params![tid, uid],
-            |r| r.get(0),
-        )?;
-        if !owned {
-            return Err(AppError::NotFound(format!("Task {tid} not found.")));
-        }
-    }
-    if let Some(pid) = input.project_id {
-        let owned: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM projects WHERE id = ?1 AND user_id = ?2)",
-            params![pid, uid],
-            |r| r.get(0),
-        )?;
-        if !owned {
-            return Err(AppError::NotFound(format!("Project {pid} not found.")));
-        }
-    }
-
-    let ts_short = ts.replace([':', 'T', 'Z', '.', '-'], "_");
     tx.execute(
-        "INSERT INTO attachments (task_id, project_id, filename, path, size, mime, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)",
-        params![input.task_id, input.project_id, filename, dest.to_string_lossy(), size, mime, ts],
+        "INSERT INTO attachments (task_id, project_id, filename, path, size, mime, created_at, five_why_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        params![input.task_id, input.project_id, filename, dest.to_string_lossy(), size, mime, ts, input.five_why_id],
     )?;
     let rowid = tx.last_insert_rowid();
     if let Some(tid) = input.task_id {
         let task_key: String = tx.query_row("SELECT key FROM tasks WHERE id = ?1", [tid], |r| r.get(0))?;
         let _ = indexer::upsert(&tx, "attachment", rowid, uid, &format!("Attachment on {task_key}"), &filename)?;
+    } else if let Some(fwid) = input.five_why_id {
+        let _ = indexer::upsert(&tx, "attachment", rowid, uid, &format!("Attachment on 5-WHY #{fwid}"), &filename)?;
     }
 
     let attachment: Attachment = tx.query_row(
-        "SELECT id, task_id, project_id, filename, path, size, mime, created_at
-         FROM attachments WHERE id = ?1",
+        &format!("SELECT {ATTACH_COLS} FROM attachments a WHERE a.id = ?1"),
         [rowid],
         attachment_from_row,
     )?;
@@ -165,6 +226,7 @@ pub struct AttachmentBytesInput {
     pub filename: String,
     pub task_id: Option<i64>,
     pub project_id: Option<i64>,
+    pub five_why_id: Option<i64>,
     pub mime: Option<String>,
 }
 
@@ -199,45 +261,23 @@ pub fn add_attachment_bytes(
 
     let mut db = state.db.lock().map_err(|_| AppError::Other("db lock poisoned".into()))?;
     let tx = db.transaction()?;
-
-    if let Some(tid) = input.task_id {
-        let owned: bool = tx.query_row(
-            "SELECT EXISTS(
-                SELECT 1 FROM tasks t JOIN projects p ON p.id = t.project_id
-                WHERE t.id = ?1 AND p.user_id = ?2
-            )",
-            params![tid, uid],
-            |r| r.get(0),
-        )?;
-        if !owned {
-            return Err(AppError::NotFound(format!("Task {tid} not found.")));
-        }
-    }
-    if let Some(pid) = input.project_id {
-        let owned: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM projects WHERE id = ?1 AND user_id = ?2)",
-            params![pid, uid],
-            |r| r.get(0),
-        )?;
-        if !owned {
-            return Err(AppError::NotFound(format!("Project {pid} not found.")));
-        }
-    }
+    verify_owner(&tx, uid, input.task_id, input.project_id, input.five_why_id)?;
 
     tx.execute(
-        "INSERT INTO attachments (task_id, project_id, filename, path, size, mime, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)",
-        params![input.task_id, input.project_id, filename, dest.to_string_lossy(), size, input.mime, ts],
+        "INSERT INTO attachments (task_id, project_id, filename, path, size, mime, created_at, five_why_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        params![input.task_id, input.project_id, filename, dest.to_string_lossy(), size, input.mime, ts, input.five_why_id],
     )?;
     let rowid = tx.last_insert_rowid();
     if let Some(tid) = input.task_id {
         let task_key: String = tx.query_row("SELECT key FROM tasks WHERE id = ?1", [tid], |r| r.get(0))?;
         let _ = indexer::upsert(&tx, "attachment", rowid, uid, &format!("Attachment on {task_key}"), &filename)?;
+    } else if let Some(fwid) = input.five_why_id {
+        let _ = indexer::upsert(&tx, "attachment", rowid, uid, &format!("Attachment on 5-WHY #{fwid}"), &filename)?;
     }
 
     let attachment: Attachment = tx.query_row(
-        "SELECT id, task_id, project_id, filename, path, size, mime, created_at
-         FROM attachments WHERE id = ?1",
+        &format!("SELECT {ATTACH_COLS} FROM attachments a WHERE a.id = ?1"),
         [rowid],
         attachment_from_row,
     )?;
@@ -248,7 +288,7 @@ pub fn add_attachment_bytes(
     Ok(attachment)
 }
 
-/// Read an attachment back out as a data URL for inline previews.
+/// Read an attachment back out as a data URL for inline previews / downloads.
 #[tauri::command(rename_all = "snake_case")]
 pub fn read_attachment_data(
     state: State<'_, AppState>,
@@ -265,20 +305,19 @@ pub fn read_attachment_data(
                  SELECT 1 FROM tasks t JOIN projects p ON p.id = t.project_id
                  WHERE t.id = a.task_id AND p.user_id = ?2
              )
+             OR EXISTS(SELECT 1 FROM five_whys fw WHERE fw.id = a.five_why_id AND fw.user_id = ?2)
          )",
         params![id, uid],
         |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
     )?;
 
     let bytes = fs::read(&path)?;
-    let mime = mime
-        .filter(|m| !m.is_empty())
-        .or_else(|| mime_for_filename(&filename))
-        .unwrap_or_else(|| "image/png".to_string());
+    let mime = resolve_mime(mime, &filename);
+    let is_image = is_image_mime(&mime);
     let data_url = super::base64::encode_data_url(Some(&mime), &bytes);
 
     drop(db);
-    Ok(AttachmentRef { id, filename, size, mime: Some(mime), data_url })
+    Ok(AttachmentRef { id, filename, size, mime: Some(mime), is_image, data_url })
 }
 
 #[derive(Serialize)]
@@ -288,7 +327,51 @@ pub struct AttachmentRef {
     pub filename: String,
     pub size: i64,
     pub mime: Option<String>,
+    pub is_image: bool,
     pub data_url: String,
+}
+
+/// Copy an attachment out to a user-chosen destination (Save-as).
+#[tauri::command(rename_all = "snake_case")]
+pub fn save_attachment(
+    state: State<'_, AppState>,
+    id: i64,
+    dest_path: String,
+) -> Result<String, AppError> {
+    ensure_non_empty(&dest_path, "Destination path")?;
+    let uid = state.active_user()?;
+    let db = state.db.lock().map_err(|_| AppError::Other("db lock poisoned".into()))?;
+    let (filename, path): (String, String) = db.query_row(
+        "SELECT a.filename, a.path
+         FROM attachments a
+         WHERE a.id = ?1 AND (
+             EXISTS(SELECT 1 FROM projects p WHERE p.id = a.project_id AND p.user_id = ?2)
+             OR EXISTS(
+                 SELECT 1 FROM tasks t JOIN projects p ON p.id = t.project_id
+                 WHERE t.id = a.task_id AND p.user_id = ?2
+             )
+             OR EXISTS(SELECT 1 FROM five_whys fw WHERE fw.id = a.five_why_id AND fw.user_id = ?2)
+         )",
+        params![id, uid],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    drop(db);
+
+    let dest = Path::new(&dest_path);
+    let out = if dest.extension().is_some() {
+        dest.to_path_buf()
+    } else {
+        let ext = filename.rsplit_once('.').map(|(_, e)| e.to_string()).unwrap_or_else(|| "bin".to_string());
+        dest.with_extension(ext)
+    };
+
+    if let Some(parent) = out.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)?;
+        }
+    }
+    fs::copy(&path, &out)?;
+    Ok(out.to_string_lossy().into_owned())
 }
 
 #[derive(Deserialize)]
@@ -297,6 +380,7 @@ pub struct AttachmentInput {
     pub src_path: String,
     pub task_id: Option<i64>,
     pub project_id: Option<i64>,
+    pub five_why_id: Option<i64>,
     pub mime: Option<String>,
 }
 
@@ -330,45 +414,23 @@ pub fn add_attachment(
 
     let mut db = state.db.lock().map_err(|_| AppError::Other("db lock poisoned".into()))?;
     let tx = db.transaction()?;
-
-    if let Some(tid) = input.task_id {
-        let owned: bool = tx.query_row(
-            "SELECT EXISTS(
-                SELECT 1 FROM tasks t JOIN projects p ON p.id = t.project_id
-                WHERE t.id = ?1 AND p.user_id = ?2
-            )",
-            params![tid, uid],
-            |r| r.get(0),
-        )?;
-        if !owned {
-            return Err(AppError::NotFound(format!("Task {tid} not found.")));
-        }
-    }
-    if let Some(pid) = input.project_id {
-        let owned: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM projects WHERE id = ?1 AND user_id = ?2)",
-            params![pid, uid],
-            |r| r.get(0),
-        )?;
-        if !owned {
-            return Err(AppError::NotFound(format!("Project {pid} not found.")));
-        }
-    }
+    verify_owner(&tx, uid, input.task_id, input.project_id, input.five_why_id)?;
 
     tx.execute(
-        "INSERT INTO attachments (task_id, project_id, filename, path, size, mime, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)",
-        params![input.task_id, input.project_id, filename, dest.to_string_lossy(), size, input.mime, ts],
+        "INSERT INTO attachments (task_id, project_id, filename, path, size, mime, created_at, five_why_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        params![input.task_id, input.project_id, filename, dest.to_string_lossy(), size, input.mime, ts, input.five_why_id],
     )?;
     let rowid = tx.last_insert_rowid();
     if let Some(tid) = input.task_id {
         let task_key: String = tx.query_row("SELECT key FROM tasks WHERE id = ?1", [tid], |r| r.get(0))?;
         let _ = indexer::upsert(&tx, "attachment", rowid, uid, &format!("Attachment on {task_key}"), &filename)?;
+    } else if let Some(fwid) = input.five_why_id {
+        let _ = indexer::upsert(&tx, "attachment", rowid, uid, &format!("Attachment on 5-WHY #{fwid}"), &filename)?;
     }
 
     let attachment: Attachment = tx.query_row(
-        "SELECT id, task_id, project_id, filename, path, size, mime, created_at
-         FROM attachments WHERE id = ?1",
+        &format!("SELECT {ATTACH_COLS} FROM attachments a WHERE a.id = ?1"),
         [rowid],
         attachment_from_row,
     )?;
@@ -384,39 +446,46 @@ pub fn list_attachments(
     state: State<'_, AppState>,
     task_id: Option<i64>,
     project_id: Option<i64>,
+    five_why_id: Option<i64>,
 ) -> Result<Vec<Attachment>, AppError> {
     let uid = state.active_user()?;
     let db = state.db.lock().map_err(|_| AppError::Other("db lock poisoned".into()))?;
     let rows: Vec<Attachment> = if let Some(tid) = task_id {
-        db.prepare(
-            "SELECT a.id, a.task_id, a.project_id, a.filename, a.path, a.size, a.mime, a.created_at
-             FROM attachments a
+        db.prepare(&format!(
+            "SELECT {ATTACH_COLS} FROM attachments a
              JOIN tasks t ON t.id = a.task_id
              LEFT JOIN projects p ON p.id = t.project_id
              WHERE a.task_id = ?1 AND p.user_id = ?2
-             ORDER BY a.created_at DESC",
-        )?
+             ORDER BY a.created_at DESC"
+        ))?
         .query_map(params![tid, uid], attachment_from_row)?
         .collect::<Result<_, _>>()?
     } else if let Some(pid) = project_id {
-        db.prepare(
-            "SELECT a.id, a.task_id, a.project_id, a.filename, a.path, a.size, a.mime, a.created_at
-             FROM attachments a
+        db.prepare(&format!(
+            "SELECT {ATTACH_COLS} FROM attachments a
              LEFT JOIN projects p ON p.id = a.project_id
              WHERE a.project_id = ?1 AND p.user_id = ?2
-             ORDER BY a.created_at DESC",
-        )?
+             ORDER BY a.created_at DESC"
+        ))?
         .query_map(params![pid, uid], attachment_from_row)?
         .collect::<Result<_, _>>()?
+    } else if let Some(fwid) = five_why_id {
+        db.prepare(&format!(
+            "SELECT {ATTACH_COLS} FROM attachments a
+             JOIN five_whys fw ON fw.id = a.five_why_id
+             WHERE a.five_why_id = ?1 AND fw.user_id = ?2
+             ORDER BY a.created_at DESC"
+        ))?
+        .query_map(params![fwid, uid], attachment_from_row)?
+        .collect::<Result<_, _>>()?
     } else {
-        db.prepare(
-            "SELECT a.id, a.task_id, a.project_id, a.filename, a.path, a.size, a.mime, a.created_at
-             FROM attachments a
+        db.prepare(&format!(
+            "SELECT {ATTACH_COLS} FROM attachments a
              LEFT JOIN tasks t ON t.id = a.task_id
              LEFT JOIN projects p ON p.id = COALESCE(t.project_id, a.project_id)
              WHERE p.user_id = ?1
-             ORDER BY a.created_at DESC",
-        )?
+             ORDER BY a.created_at DESC"
+        ))?
         .query_map([uid], attachment_from_row)?
         .collect::<Result<_, _>>()?
     };
@@ -437,7 +506,10 @@ pub fn remove_attachment(
             SELECT 1 FROM attachments a
             LEFT JOIN tasks t ON t.id = a.task_id
             LEFT JOIN projects p ON p.id = COALESCE(t.project_id, a.project_id)
-            WHERE a.id = ?1 AND p.user_id = ?2
+            WHERE a.id = ?1 AND (
+                p.user_id = ?2
+                OR EXISTS(SELECT 1 FROM five_whys fw WHERE fw.id = a.five_why_id AND fw.user_id = ?2)
+            )
         )",
         params![id, uid],
         |r| r.get(0),
@@ -455,4 +527,44 @@ pub fn remove_attachment(
     let _ = fs::remove_file(&path);
     let _ = app.emit("attachment-removed", id);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mime_by_extension_covers_documents() {
+        assert_eq!(mime_for_filename("report.txt").as_deref(), Some("text/plain"));
+        assert_eq!(mime_for_filename("README.md").as_deref(), Some("text/markdown"));
+        assert_eq!(mime_for_filename("data.CSV").as_deref(), Some("text/csv"));
+        assert_eq!(mime_for_filename("spec.pdf").as_deref(), Some("application/pdf"));
+        assert_eq!(mime_for_filename("archive.zip").as_deref(), Some("application/zip"));
+        assert_eq!(mime_for_filename("notes.JSON").as_deref(), Some("application/json"));
+        assert_eq!(mime_for_filename("photo.PNG").as_deref(), Some("image/png"));
+        assert_eq!(mime_for_filename("no-extension"), None);
+    }
+
+    #[test]
+    fn resolve_mime_falls_back_without_labeling_docs_as_images() {
+        assert_eq!(resolve_mime(None, "spec.pdf"), "application/pdf");
+        assert_eq!(resolve_mime(Some("text/plain".into()), "spec.pdf"), "text/plain");
+        assert_eq!(resolve_mime(Some("".into()), "readme.md"), "text/markdown");
+        assert_eq!(resolve_mime(None, "mystery.bin"), FALLBACK_MIME);
+        assert_eq!(resolve_mime(None, "no-extension"), FALLBACK_MIME);
+    }
+
+    #[test]
+    fn image_detection() {
+        assert!(is_image_mime("image/png"));
+        assert!(is_image_mime("image/jpeg"));
+        assert!(!is_image_mime("application/pdf"));
+        assert!(!is_image_mime("text/plain"));
+    }
+
+    #[test]
+    fn ext_for_mime_defaults_for_unknown() {
+        assert_eq!(ext_for_mime("text/plain"), "txt");
+        assert_eq!(ext_for_mime("application/octet-stream"), "png");
+    }
 }

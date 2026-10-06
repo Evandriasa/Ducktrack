@@ -115,26 +115,89 @@ export function closeModal(id) {
   el.innerHTML = "";
 }
 
+function isTextualAttachment(a) {
+  const m = (a.mime || "").toLowerCase();
+  if (m.startsWith("text/")) return true;
+  if (["application/json", "application/xml", "application/rtf", "application/javascript"]
+      .some(x => m.startsWith(x))) return true;
+  return /\.(txt|md|markdown|csv|tsv|log|json|xml|yaml|yml|ini|toml|html|htm|css|js|ts|py|rs|sql|sh|bat|java|c|cpp|h)$/i
+    .test(a.filename || "");
+}
+
+function dataUrlToText(a, maxLen = 40000) {
+  try {
+    const i = (a.dataUrl || "").indexOf("base64,");
+    if (i < 0) return "";
+    const bin = atob(a.dataUrl.slice(i + 7));
+    const bytes = new Uint8Array(bin.length);
+    for (let k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k);
+    let text = new TextDecoder("utf-8").decode(bytes);
+    if (text.length > maxLen) text = text.slice(0, maxLen) + `\n\n… (truncated, ${a.size} bytes total)`;
+    return text;
+  } catch { return ""; }
+}
+
+async function saveAttachmentToDisk(a) {
+  const api = (window.__TAURI__ || {}) && (window.__TAURI__.dialog || {});
+  if (!api || typeof api.save !== "function") {
+    toast("File save dialog is unavailable.", true);
+    return;
+  }
+  const filters = a.mime ? [{ name: "File", extensions: [(a.filename.split(".").pop() || "bin")] }] : [];
+  const dest = await api.save({ defaultPath: a.filename || "attachment", filters });
+  if (!dest) return;
+  try {
+    await call("save_attachment", { id: a.id, dest_path: dest });
+    toast(`Saved to ${dest}`);
+  } catch (e) { toast(e.message, true); }
+}
+
 function openImageViewer(a) {
   const el = document.getElementById("image-viewer");
   if (!el || !a || !a.dataUrl) return;
+  const saveBtn = `<div class="row mt-1"><button class="btn btn-sm" data-att-save="${a.id}">&#11015; Save as&hellip;</button></div>`;
+  let body;
+  if (a.isImage) {
+    body = `<img src="${esc(a.dataUrl)}" alt="${esc(a.filename || "attachment")}">`;
+  } else if (a.isTextual || isTextualAttachment(a)) {
+    const text = dataUrlToText(a);
+    body = text
+      ? `<pre class="att-doc-preview">${esc(text)}</pre>`
+      : `<div class="xs muted">No readable preview for this file.</div>`;
+  } else {
+    body = `<div class="xs muted">Binary file — use <b>Save as&hellip;</b> to download it.</div>`;
+  }
   el.innerHTML = `<div class="lightbox" data-lightbox-close>
       <div class="lightbox-cap">${esc(a.filename || "")} · ${fmtBytes(a.size)}</div>
-      <img src="${esc(a.dataUrl)}" alt="${esc(a.filename || "attachment")}">
+      <div class="att-view-body">${body}</div>
+      ${saveBtn}
     </div>`;
   el.classList.remove("hidden");
+  const save = el.querySelector("[data-att-save]");
+  if (save) save.addEventListener("click", () => saveAttachmentToDisk(a));
 }
 
 function closeImageViewer() {
   closeModal("image-viewer");
 }
 
+export function showAttachment(a) {
+  openImageViewer(a);
+}
+
 function bindImageViewerClicks(root) {
-  root.querySelectorAll("[data-att-view]").forEach(img => {
-    img.addEventListener("click", () => {
+  root.querySelectorAll("[data-att-view], [data-att-prev]").forEach(el => {
+    el.addEventListener("click", () => {
       const atts = window.__dtTaskAttachments || [];
-      const found = atts.find(x => String(x.id) === img.dataset.attView);
+      const found = atts.find(x => String(x.id) === el.dataset.attView || String(x.id) === el.dataset.attPrev);
       if (found) openImageViewer(found);
+    });
+  });
+  root.querySelectorAll("[data-att-save]").forEach(el => {
+    el.addEventListener("click", () => {
+      const atts = window.__dtTaskAttachments || [];
+      const found = atts.find(x => String(x.id) === el.dataset.attSave);
+      if (found) saveAttachmentToDisk(found);
     });
   });
 }
@@ -352,14 +415,22 @@ function relLabelOf(r) {
 }
 
 function attThumbHtml(a) {
-  return a.dataUrl
-    ? `<img class="att-thumb" src="${esc(a.dataUrl)}" alt="${esc(a.filename)}" data-att-view="${a.id}">`
-    : '<span class="xs muted">…</span>';
+  if (!a.dataUrl) return '<span class="xs muted">…</span>';
+  if (a.isImage) {
+    return `<img class="att-thumb" src="${esc(a.dataUrl)}" alt="${esc(a.filename)}" data-att-view="${a.id}" title="${esc(a.filename)}">`;
+  }
+  const icon = isTextualAttachment(a) ? "\u{1F4C4}" : "\u{1F5CB}\uFE0F";
+  return `<div class="att-tile" data-att-prev="${a.id}" title="${esc(a.filename)}"><span>${icon}</span><span class="att-tile-ext">${esc(extOf(a.filename))}</span></div>`;
+}
+
+function extOf(filename) {
+  const parts = (filename || "").split(".");
+  return parts.length > 1 ? parts.pop().toUpperCase() : "FILE";
 }
 
 function attachmentPreviewList(task) {
   const atts = task.attachments || [];
-  if (!atts.length) return `<div class="xs muted">No screenshots yet</div>`;
+  if (!atts.length) return `<div class="xs muted">No attachments yet</div>`;
   return atts.map(a =>
     `<div class="att-item" data-att-id="${a.id}"><div class="att-frame">${attThumbHtml(a)}</div>
       <div class="xs muted ellipsis" style="flex:1">${esc(a.filename)}</div>
@@ -370,7 +441,7 @@ function attachmentPreviewList(task) {
 
 function attachmentViewList(task) {
   const atts = task.attachments || [];
-  if (!atts.length) return `<div class="xs muted">No screenshots yet</div>`;
+  if (!atts.length) return `<div class="xs muted">No attachments yet</div>`;
   return atts.map(a =>
     `<div class="att-item"><div class="att-frame">${attThumbHtml(a)}</div>
       <div class="xs muted ellipsis" style="flex:1">${esc(a.filename)}</div>
@@ -412,9 +483,9 @@ function renderTaskView(b) {
          <div><div class="xs muted mb-1">Description</div><div class="small" style="line-height:1.7">${renderTextWithMentions(task.description || 'No description')}</div></div>
          <div><div class="xs muted mb-1">Tags</div><div class="row" style="gap:8px;flex-wrap:wrap">${tagChips}</div></div>
          <div><div class="xs muted mb-1">Relationships</div><div id="tm-rels">${relList}</div></div>
-         <div><div class="xs muted mb-1">Screenshots & images</div><div id="tm-attachments">${attachmentViewList(task)}</div></div>
-         <div><div class="xs muted mb-1">Comments</div><div id="tm-comments">${commentList}</div></div>
-         <div><div class="xs muted mb-1">History</div><div class="timeline">${timeline}</div></div>
+<div><div class="xs muted mb-1">Attachments</div><div id="tm-attachments">${attachmentViewList(task)}</div></div>
+          <div><div class="xs muted mb-1">Comments</div><div id="tm-comments">${commentList}</div></div>
+          <div><div class="xs muted mb-1">History</div><div class="timeline">${timeline}</div></div>
        </div>
        <div class="stack" style="gap:12px">
          ${metaLine("Status", statusBadge(task.status))}
@@ -509,10 +580,10 @@ function renderTaskEditor(b) {
              <select id="tm-rel-task" class="select" style="flex:1.6"><option value="">Other task…</option>${relTaskOpts}</select>
               <button class="btn btn-sm" id="tm-rel-add">Link</button>
             </div></div>
-          <div><div class="xs muted mb-1">Screenshots & images</div>
+          <div><div class="xs muted mb-1">Attachments</div>
             <div id="tm-attachments">${attachmentPreviewList(task)}</div>
-            <div class="row mt-1"><input id="tm-attch-file" type="file" accept="image/*" hidden>
-              <button class="btn btn-sm" id="tm-attch-btn">&#128247; Attach image</button>
+            <div class="row mt-1"><input id="tm-attch-file" type="file" hidden>
+              <button class="btn btn-sm" id="tm-attch-btn">&#128206; Attach files</button>
               <span class="xs muted ml-auto">or paste with Ctrl&#8984;+V</span></div>
           </div>
           <div><div class="xs muted mb-1">Comments</div><div id="tm-comments">${commentList}</div>

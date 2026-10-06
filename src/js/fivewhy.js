@@ -1,5 +1,5 @@
 import { call, loadProjects } from "./api.js";
-import { esc, fmtDay, projectOptions } from "./ui.js";
+import { esc, fmtDay, fmtBytes, projectOptions } from "./ui.js";
 
 const FW_STATUSES = ["Open", "Investigating", "Actioned", "Closed"];
 
@@ -148,13 +148,25 @@ async function openEditor(record, projects, container) {
        </div>
        <div class="field"><label>Root cause</label><textarea id="fw-root" class="textarea" placeholder="The underlying cause">${val("rootCause")}</textarea></div>
        <div class="field"><label>Corrective action</label><textarea id="fw-action" class="textarea" placeholder="What will be done to prevent recurrence?">${val("correctiveAction")}</textarea></div>
-       <div class="row">
-         <div class="field grow"><label>Owner</label><input id="fw-owner" class="input" value="${val("owner")}" placeholder="Responsible person"></div>
-         <div class="field grow"><label>Due date</label><input id="fw-due" class="input" type="date" value="${val("dueDate")}"></div>
-         <div class="field grow"><label>Status</label><select id="fw-status" class="select">
-           ${FW_STATUSES.map(s => `<option value="${s}" ${record?.status === s ? "selected" : ""}>${s}</option>`).join("")}
-         </select></div>
-       </div>
+<div class="row">
+          <div class="field grow"><label>Owner</label><input id="fw-owner" class="input" value="${val("owner")}" placeholder="Responsible person"></div>
+          <div class="field grow"><label>Due date</label><input id="fw-due" class="input" type="date" value="${val("dueDate")}"></div>
+          <div class="field grow"><label>Status</label><select id="fw-status" class="select">
+            ${FW_STATUSES.map(s => `<option value="${s}" ${record?.status === s ? "selected" : ""}>${s}</option>`).join("")}
+          </select></div>
+        </div>
+        ${isEdit ? `
+        <div class="field">
+          <label>Attachments</label>
+          <div id="fw-attachments"><div class="xs muted">Loading&hellip;</div></div>
+          <div class="row mt-1"><input id="fw-attch-file" type="file" hidden>
+            <button class="btn btn-sm" id="fw-attch-btn">&#128206; Attach files</button>
+            <span class="xs muted ml-auto">Images or documents</span></div>
+        </div>` : `
+        <div class="field">
+          <label>Attachments</label>
+          <div class="xs muted">Save this analysis first, then you can attach images or documents.</div>
+        </div>`}
      </div>`,
     `<button class="btn" data-close="fivewhy-modal">Cancel</button>
      <button class="btn btn-primary" id="fw-save">${isEdit ? "Save changes" : "Create analysis"}</button>`
@@ -213,6 +225,88 @@ async function openEditor(record, projects, container) {
       toast(e.message, true);
     }
   });
+
+  if (isEdit) {
+    const panel = document.getElementById("fw-attachments");
+    if (panel) {
+      await renderFiveWhyAttachments(record.id, panel);
+      const input = document.getElementById("fw-attch-file");
+      const btn = document.getElementById("fw-attch-btn");
+      btn?.addEventListener("click", () => input?.click());
+      input?.addEventListener("change", async () => {
+        const files = Array.from(input.files || []);
+        input.value = "";
+        for (const f of files) {
+          try {
+            const buf = new Uint8Array(await f.arrayBuffer());
+            let bin = "";
+            const chunk = 0x8000;
+            for (let i = 0; i < buf.length; i += chunk) {
+              bin += String.fromCharCode(...buf.subarray(i, i + chunk));
+            }
+            await call("add_attachment_bytes", {
+              input: { data: btoa(bin), filename: f.name, five_why_id: record.id, mime: f.type || null },
+            });
+            toast(`Attached ${f.name}`);
+          } catch (e) { toast(`Failed to attach ${f.name}: ${e.message}`, true); }
+        }
+        await renderFiveWhyAttachments(record.id, panel);
+      });
+      panel.addEventListener("click", async (e) => {
+        const del = e.target.closest("[data-fw-att-del]");
+        if (del) {
+          e.stopPropagation();
+          const { confirmDialog } = await import("./app.js");
+          if (!(await confirmDialog("Remove this attachment?", { title: "Remove attachment", confirmLabel: "Remove" }))) return;
+          try { await call("remove_attachment", { id: Number(del.dataset.fwAttDel) }); toast("Attachment removed"); }
+          catch (err) { toast(err.message, true); }
+          await renderFiveWhyAttachments(record.id, panel);
+          return;
+        }
+        const tile = e.target.closest("[data-fw-att]");
+        if (tile) {
+          e.stopPropagation();
+          const atts = window.__fwAttachments || [];
+          const found = atts.find(x => String(x.id) === tile.dataset.fwAtt);
+          if (found) {
+            window.__dtTaskAttachments = atts;
+            const { showAttachment } = await import("./app.js");
+            showAttachment(found);
+          }
+        }
+      });
+    }
+  }
+}
+
+function fwTextualExt(filename) {
+  return /\.(txt|md|markdown|csv|tsv|log|json|xml|yaml|yml|ini|toml|html|htm|css|js|ts|py|rs|sql|sh|bat|java|c|cpp|h|pdf)$/i.test(filename || "");
+}
+
+async function renderFiveWhyAttachments(id, panel) {
+  let list = [];
+  try { list = await call("list_attachments", { five_why_id: id }); } catch {}
+  const atts = (await Promise.all(
+    list.map(a => call("read_attachment_data", { id: a.id }).catch(() => null))
+  )).filter(Boolean);
+  window.__fwAttachments = atts;
+  if (!atts.length) {
+    panel.innerHTML = `<div class="xs muted">No attachments yet</div>`;
+    return;
+  }
+  panel.innerHTML = atts.map(a => {
+    const ext = (a.filename.split(".").pop() || "FILE").toUpperCase().slice(0, 6);
+    const icon = a.isImage
+      ? `<img class="att-thumb" src="${esc(a.dataUrl)}" alt="${esc(a.filename)}" data-fw-att="${a.id}" title="${esc(a.filename)}">`
+      : `<div class="att-tile" data-fw-att="${a.id}" title="${esc(a.filename)}">
+           <span>${fwTextualExt(a.filename) ? "&#128196;" : "&#128465;&#65039;"}</span>
+           <span class="att-tile-ext">${esc(ext)}</span>
+         </div>`;
+    return `<div class="att-item"><div class="att-frame">${icon}</div>
+      <div class="xs muted ellipsis" style="flex:1">${esc(a.filename)}</div>
+      <span class="xs muted">${fmtBytes(a.size)}</span>
+      <button class="btn btn-xs btn-danger" data-fw-att-del="${a.id}" title="Remove">&times;</button></div>`;
+  }).join("");
 }
 
 async function confirmDelete(p, container) {
