@@ -1,6 +1,6 @@
 [package]
 name = "ducktrack"
-version = "0.2.3"
+version = "0.2.4"
 description = "DuckTrack — Engineering Workspace"
 edition = "2021"
 rust-version = "1.77.2"

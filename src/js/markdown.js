@@ -49,7 +49,8 @@ function buildTable(rows) {
   return `<table><thead><tr>${head.map((h) => `<th>${inline(h)}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table>`;
 }
 
-export function renderMarkdown(src) {
+export function renderMarkdown(src, opts = {}) {
+  const breaks = !!opts.breaks;
   const text = String(src || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   if (!text.trim()) return "";
 
@@ -110,7 +111,7 @@ export function renderMarkdown(src) {
         buf.push(lines[i].replace(/^\s*>\s?/, ""));
         i++;
       }
-      out.push(`<blockquote>${renderMarkdown(buf.join("\n"))}</blockquote>`);
+      out.push(`<blockquote>${renderMarkdown(buf.join("\n"), opts)}</blockquote>`);
       continue;
     }
 
@@ -138,7 +139,10 @@ export function renderMarkdown(src) {
       i++;
     }
     if (buf.length) {
-      out.push(`<p>${inline(escapeHtml(buf.join(" ")))}</p>`);
+      // In "breaks" mode (plain-text documents) soft line breaks are kept as
+      // literal <br> so each written line stays on its own line.
+      const joined = buf.join(breaks ? "\n" : " ");
+      out.push(`<p>${inline(escapeHtml(joined)).replace(/\n/g, "<br>")}</p>`);
       continue;
     }
 

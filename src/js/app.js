@@ -918,7 +918,7 @@ export async function openDocumentModal(id) {
   openModal("task-modal", buildModal(
     "task-modal",
     `<h2>${esc(doc.title)}</h2>`,
-    `<div class="card card-pad doc-preview">${renderMarkdown(doc.content) || '<div class="empty"><div class="big">Empty document</div></div>'}</div>`,
+    `<div class="card card-pad doc-preview">${renderMarkdown(doc.content, { breaks: true }) || '<div class="empty"><div class="big">Empty document</div></div>'}</div>`,
     `<button class="btn" data-close="task-modal">Close</button>
      <button class="btn" id="doc-edit">Edit</button>
      <button class="btn btn-danger" id="doc-delete">Delete document</button>`
