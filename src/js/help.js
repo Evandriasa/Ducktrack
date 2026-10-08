@@ -31,8 +31,19 @@ export async function render(container) {
           <div><span class="key">Work Log</span> — what you actually did. Logs can be linked to a task, a project, both or neither.</div>
           <div><span class="key">Documentation</span> — project-linked knowledge, stored in Markdown and rendered readably.</div>
           <div><span class="key">Portfolio</span> — a professional summary built automatically from real history, exportable as Markdown + HTML.</div>
-          <div><span class="key">Settings</span> — users, theme, tags, backups, export/import and reset.</div>
+          <div><span class="key">5-Why</span> — structured root-cause analysis: a problem, five why-layers, corrective action and owner. Analyses can be linked to a project or a generated task, and carry their own attachments.</div>
+          <div><span class="key">Settings</span> — users, theme, backups, restore, export/import, update checks and reset.</div>
         </div>
+      </div>
+
+      <div class="card card-pad mb-2">
+        <h3 class="small" style="font-weight:600">Attachments</h3>
+        <p class="small mt-2" style="line-height:1.7">
+          Tasks and 5-Why analyses accept <strong>any file</strong> as an attachment — click <em>Attach files</em> and pick one.
+          Images preview in a viewer; text-like files (txt, md, logs, code, CSV…) show a read-only preview. Either way, click
+          <em>Save as…</em> in the viewer to export the file anywhere on disk. Attachments live in the workspace's
+          <code>attachments/</code> folder and are included in backups and exports.
+        </p>
       </div>
 
       <div class="card card-pad mb-2">
@@ -42,6 +53,7 @@ export async function render(container) {
           <div><span class="kbd">Ctrl P</span> quick actions / command palette</div>
           <div><span class="kbd">Ctrl 1…9</span> jump directly to a page</div>
           <div><span class="kbd">Ctrl /</span> this help page</div>
+          <div><span class="kbd">Ctrl ⌘ V</span> paste a copied screenshot/image straight into the open task editor</div>
           <div><span class="kbd">Esc</span> close any dialog</div>
         </div>
       </div>
@@ -56,11 +68,12 @@ export async function render(container) {
       </div>
 
       <div class="card card-pad mb-2">
-        <h3 class="small" style="font-weight:600">Data, backup and export</h3>
+        <h3 class="small" style="font-weight:600">Data, backup and updates</h3>
         <p class="small mt-2" style="line-height:1.7">
           Your data lives in <code>Settings → Workspace</code>. Create a backup at any time and restore the latest in
           Settings → Backup. Export copies the whole workspace (database + attachments); import restores it. "Reset workspace"
-          empties everything — use it carefully.
+          empties everything — use it carefully. <strong>Updates</strong> are downloaded from the project's GitHub releases:
+          open Settings → Updates, check for a newer version, then download and install it when you're ready.
         </p>
       </div>
 
@@ -69,7 +82,8 @@ export async function render(container) {
         <div class="mt-2 stack" style="gap:8px">
           <div>• Use <strong>project keys</strong> like <code>AGV</code> — task identifiers are derived from them (<code>AGV-042</code>).</div>
           <div>• Mention a task anywhere by typing <code>@@KEY</code> (e.g. <code>@@AGV-042</code>) — it becomes a clickable link.</div>
-          <div>• Click a task name anywhere to open it: statuses, priorities, quick work logs, tags, comments, relationships, timers and estimates.</div>
+          <div>• Click a task name anywhere to open it: statuses, priorities, project, quick work logs, tags, comments, attachments, relationships, timers and estimates.</div>
+          <div>• Drag a file onto… no — press <strong>Attach files</strong> in the task editor, or simply copy an image and paste (<span class="kbd">Ctrl ⌘ V</span>) while editing a task.</div>
           <div>• Log work against a task even while it stays In Progress — status and effort are separate concepts.</div>
           <div>• Start a <strong>timer</strong> from a task; stopping it automatically logs the elapsed time as a work log.</div>
         </div>

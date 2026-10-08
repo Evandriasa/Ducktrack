@@ -194,6 +194,7 @@ fn build_html(
     } else {
         completed_total as f64 * 100.0 / total_tasks as f64
     };
+    let name_esc = esc_html(name);
 
     let mut cards = String::new();
     for p in projects {
@@ -231,14 +232,14 @@ fn build_html(
 
     format!(
         "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">\
-         <title>Work Portfolio — {name}</title><style>\
+         <title>Work Portfolio — {name_esc}</title><style>\
          body{{font-family:-apple-system,'Segoe UI',Roboto,sans-serif;max-width:980px;margin:2rem auto;padding:0 1rem;color:#1c2733;background:#fff}}\
          h1{{border-bottom:3px solid #2f6fd0;padding-bottom:.4rem}}h2{{margin-top:1.8rem}}\
          .card{{border:1px solid #e2e8f0;border-radius:.5rem;padding:1rem 1.2rem;margin:1rem 0}}\
          .meta{{color:#5a6b7b;font-size:.9rem}}table{{border-collapse:collapse;width:100%;font-size:.92rem}}\
          th,td{{border:1px solid #e2e8f0;padding:.4rem .55rem;text-align:left}}th{{background:#f1f6fc}}\
          </style></head><body>\
-         <h1>Work Portfolio — {name}</h1>\
+         <h1>Work Portfolio — {name_esc}</h1>\
          <p class=\"meta\">Projects: {project_count} · Tasks: {total_tasks} ({completed_total} completed, {pct:.0}%) · Hours logged: {total_hours:.1}h</p>\
          {cards}</body></html>",
         project_count = projects.len()

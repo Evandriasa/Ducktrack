@@ -1,7 +1,6 @@
 mod attachments;
 mod base64;
 pub use base64::*;
-pub use attachments::*;
 mod backup;
 mod comments;
 mod dashboard;

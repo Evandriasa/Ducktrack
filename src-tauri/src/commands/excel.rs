@@ -474,8 +474,8 @@ pub fn import_excel(state: State<'_, AppState>, path: String) -> Result<ExcelImp
             let est = non_empty(row.get(8)).map(|h| (h.parse::<f64>().unwrap_or(0.0) * 60.0) as i64);
 
             let existing: i64 = tx.query_row(
-                "SELECT COUNT(*) FROM tasks WHERE key = ?1",
-                [&key],
+                "SELECT COUNT(*) FROM tasks WHERE key = ?1 AND project_id = ?2",
+                params![key, pid],
                 |r| r.get(0),
             )?;
             if existing > 0 {
@@ -483,8 +483,8 @@ pub fn import_excel(state: State<'_, AppState>, path: String) -> Result<ExcelImp
                     "UPDATE tasks SET project_id = ?1, title = ?2, type = ?3, status = ?4,
                             priority = ?5, assignee = ?6, due_date = ?7, estimated_minutes = ?8,
                             updated_at = ?9
-                     WHERE key = ?10",
-                    params![pid, title, ttype, status, priority, assignee, due, est, ts, key],
+                     WHERE key = ?10 AND project_id = ?11",
+                    params![pid, title, ttype, status, priority, assignee, due, est, ts, key, pid],
                 )?;
                 if upd > 0 { tasks_updated += 1; }
             } else {

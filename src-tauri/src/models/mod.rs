@@ -102,6 +102,7 @@ pub struct TaskUpdate {
     pub assignee: Option<String>,
     pub parent_task_id: Option<i64>,
     pub estimated_minutes: Option<i64>,
+    pub project_id: Option<i64>,
 }
 
 #[derive(Deserialize, Default)]

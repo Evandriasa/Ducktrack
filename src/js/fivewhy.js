@@ -371,7 +371,7 @@ async function createTaskFromAction(p, projects, container) {
       try {
         await call("update_five_why", {
           id: p.id,
-          input: { taskId: created.id },
+          input: { task_id: created.id },
         });
       } catch {}
       await render(container);

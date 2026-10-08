@@ -143,20 +143,28 @@ pub fn update_work_log(
         values.push(rusqlite::types::Value::Text(desc.trim().to_string()));
     }
     if let Some(dur) = input.duration_minutes {
-        sets.push("duration_minutes = ?");
-        values.push(rusqlite::types::Value::Integer(dur));
+        if dur <= 0 {
+            sets.push("duration_minutes = NULL");
+        } else {
+            sets.push("duration_minutes = ?");
+            values.push(rusqlite::types::Value::Integer(dur));
+        }
     }
     if let Some(pid) = input.project_id {
-        let owned_pj: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM projects WHERE id = ?1 AND user_id = ?2)",
-            params![pid, uid],
-            |r| r.get(0),
-        )?;
-        if !owned_pj {
-            return Err(AppError::NotFound(format!("Project {pid} not found.")));
+        if pid <= 0 {
+            sets.push("project_id = NULL");
+        } else {
+            let owned_pj: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM projects WHERE id = ?1 AND user_id = ?2)",
+                params![pid, uid],
+                |r| r.get(0),
+            )?;
+            if !owned_pj {
+                return Err(AppError::NotFound(format!("Project {pid} not found.")));
+            }
+            sets.push("project_id = ?");
+            values.push(rusqlite::types::Value::Integer(pid));
         }
-        sets.push("project_id = ?");
-        values.push(rusqlite::types::Value::Integer(pid));
     }
     if let Some(tid) = input.task_id {
         let owned_tk: bool = tx.query_row(

@@ -169,8 +169,8 @@ pub fn update_project(
         } else {
             "".into()
         };
-        values.push(rusqlite::types::Value::Text(completed_at));
         values.push(rusqlite::types::Value::Text(status.clone()));
+        values.push(rusqlite::types::Value::Text(completed_at));
     }
     if let Some(pid) = input.parent_id {
         sets.push("parent_id = ?".to_string());

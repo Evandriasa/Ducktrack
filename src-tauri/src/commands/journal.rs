@@ -22,11 +22,11 @@ pub fn get_daily_summary(
     date: Option<String>,
 ) -> Result<DailySummary, AppError> {
     let uid = state.active_user()?;
-    let day = date.unwrap_or_else(|| chrono::Utc::now().format("%Y-%m-%d").to_string());
+    let day = date.unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%d").to_string());
     let db = state.db.lock().map_err(|_| AppError::Other("db lock poisoned".into()))?;
 
     let mut logs_stmt = db.prepare(&format!(
-        "{WORKLOG_SELECT} WHERE date(w.created_at) = ?1 AND COALESCE(p.user_id, w.user_id) = ?2 ORDER BY w.created_at DESC, w.id DESC"
+        "{WORKLOG_SELECT} WHERE date(w.created_at, 'localtime') = ?1 AND COALESCE(p.user_id, w.user_id) = ?2 ORDER BY w.created_at DESC, w.id DESC"
     ))?;
     let work_logs: Vec<WorkLogWithRefs> = logs_stmt
         .query_map(params![day, uid], worklog_with_refs_from_row)?
@@ -35,7 +35,7 @@ pub fn get_daily_summary(
     let (minutes, log_count): (i64, i64) = db.query_row(
         "SELECT COALESCE(SUM(w.duration_minutes), 0), COUNT(*)
          FROM work_logs w LEFT JOIN projects p ON p.id = w.project_id
-         WHERE date(w.created_at) = ?1 AND COALESCE(p.user_id, w.user_id) = ?2",
+         WHERE date(w.created_at, 'localtime') = ?1 AND COALESCE(p.user_id, w.user_id) = ?2",
         params![day, uid],
         |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
@@ -47,7 +47,7 @@ pub fn get_daily_summary(
              FROM task_history h
              JOIN tasks t ON t.id = h.task_id
              JOIN projects p ON p.id = t.project_id
-             WHERE date(h.created_at) = ?1 AND p.user_id = ?2
+             WHERE date(h.created_at, 'localtime') = ?1 AND p.user_id = ?2
              ORDER BY h.created_at ASC, h.id ASC"
         ))?;
         let rows = stmt.query_map(params![day, uid], history_entry_from_row)?;
@@ -75,7 +75,7 @@ pub fn get_summary_report(
     let (minutes, log_count): (i64, i64) = db.query_row(
         "SELECT COALESCE(SUM(w.duration_minutes), 0), COUNT(*)
          FROM work_logs w LEFT JOIN projects p ON p.id = w.project_id
-         WHERE date(w.created_at) BETWEEN ?1 AND ?2 AND COALESCE(p.user_id, w.user_id) = ?3",
+         WHERE date(w.created_at, 'localtime') BETWEEN ?1 AND ?2 AND COALESCE(p.user_id, w.user_id) = ?3",
         params![from, to, uid],
         |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
@@ -84,7 +84,7 @@ pub fn get_summary_report(
         "SELECT COUNT(*) FROM task_history h
          JOIN tasks t ON t.id = h.task_id
          JOIN projects p ON p.id = t.project_id
-         WHERE h.action = 'completed' AND date(h.created_at) BETWEEN ?1 AND ?2 AND p.user_id = ?3",
+         WHERE h.action = 'completed' AND date(h.created_at, 'localtime') BETWEEN ?1 AND ?2 AND p.user_id = ?3",
         params![from, to, uid],
         |r| r.get(0),
     )?;
@@ -92,7 +92,7 @@ pub fn get_summary_report(
     let mut stmt = db.prepare(
         "SELECT p.key, p.name, COALESCE(SUM(w.duration_minutes), 0), COUNT(*)
          FROM work_logs w LEFT JOIN projects p ON p.id = w.project_id
-         WHERE date(w.created_at) BETWEEN ?1 AND ?2 AND COALESCE(p.user_id, w.user_id) = ?3
+         WHERE date(w.created_at, 'localtime') BETWEEN ?1 AND ?2 AND COALESCE(p.user_id, w.user_id) = ?3
          GROUP BY p.id, p.key, p.name
          ORDER BY SUM(w.duration_minutes) DESC, p.name ASC",
     )?;

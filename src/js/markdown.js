@@ -33,7 +33,7 @@ function inline(escaped) {
 
 function buildList(entries, ordered) {
   const tag = ordered ? "ol" : "ul";
-  return `<${tag}>${entries.map((e) => `<li>${inline(e)}</li>`).join("")}</${tag}>`;
+  return `<${tag}>${entries.map((e) => `<li>${inline(escapeHtml(e))}</li>`).join("")}</${tag}>`;
 }
 
 function buildTable(rows) {
@@ -43,10 +43,10 @@ function buildTable(rows) {
     .slice(1)
     .map((r) => {
       const cells = r.split("|").map((c) => c.trim()).filter((c) => c !== "");
-      return `<tr>${cells.map((c) => `<td>${inline(c)}</td>`).join("")}</tr>`;
+      return `<tr>${cells.map((c) => `<td>${inline(escapeHtml(c))}</td>`).join("")}</tr>`;
     })
     .join("");
-  return `<table><thead><tr>${head.map((h) => `<th>${inline(h)}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table>`;
+  return `<table><thead><tr>${head.map((h) => `<th>${inline(escapeHtml(h))}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table>`;
 }
 
 export function renderMarkdown(src, opts = {}) {

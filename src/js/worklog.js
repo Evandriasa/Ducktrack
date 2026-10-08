@@ -69,7 +69,8 @@ export async function render(container) {
     try {
       const { toast } = await import("./app.js");
       if (editingId) {
-        await call("update_work_log", { id: editingId, input: { description: text, duration_minutes: dur, project_id: pid } });
+        // 0 project = "General" (NULL), 0 duration = cleared — backend turns these into NULL
+        await call("update_work_log", { id: editingId, input: { description: text, duration_minutes: Number(document.getElementById("wl-dur").value) || 0, project_id: Number(document.getElementById("wl-project").value) || 0 } });
         toast("Work log updated");
       } else {
         await call("create_work_log", { input: { description: text, duration_minutes: dur, project_id: pid } });

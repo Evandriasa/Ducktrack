@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use rusqlite::{params, Row};
 use serde::{Deserialize, Serialize};
@@ -7,6 +7,17 @@ use tauri::{AppHandle, Emitter, State};
 
 use super::super::database::{indexer, now, AppState};
 use super::super::error::{ensure_non_empty, AppError};
+
+/// Reduce a user-supplied filename to a safe basename so it can never escape
+/// the attachments directory via `..` or absolute path components.
+fn basename_attachment(name: &str) -> String {
+    Path::new(name.trim())
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_default()
+        .replace(['/', '\\', '\0'], "_")
+}
 
 static MIME_TO_EXT: &[(&str, &str)] = &[
     // images
@@ -63,14 +74,6 @@ fn resolve_mime(mime: Option<String>, filename: &str) -> String {
 
 fn is_image_mime(mime: &str) -> bool {
     mime.starts_with("image/")
-}
-
-
-fn filename_for(label: &str, mime: Option<&str>, roll: i64) -> String {
-    let ext = mime.map(ext_for_mime).unwrap_or("png");
-    let id = now().replace([':', 'T', 'Z', '.', '-'], "_");
-    let roll = roll.max(0);
-    format!("{roll:05}_{id}_{label}.{ext}")
 }
 
 #[derive(Serialize, Clone)]
@@ -187,12 +190,12 @@ pub fn add_image_data(
     let filename = format!("screenshot-{id}.{}", ext_for_mime(mime.as_deref().unwrap_or("image/png")));
     let dest = state.workspace.attachments.join(&filename);
 
-    fs::write(&dest, &bytes)?;
-    let size = fs::metadata(&dest)?.len() as i64;
-
     let mut db = state.db.lock().map_err(|_| AppError::Other("db lock poisoned".into()))?;
     let tx = db.transaction()?;
     verify_owner(&tx, uid, input.task_id, input.project_id, input.five_why_id)?;
+
+    fs::write(&dest, &bytes)?;
+    let size = fs::metadata(&dest)?.len() as i64;
 
     tx.execute(
         "INSERT INTO attachments (task_id, project_id, filename, path, size, mime, created_at, five_why_id)
@@ -248,20 +251,20 @@ pub fn add_attachment_bytes(
     let uid = state.active_user()?;
     let ts = now();
     let id = now().replace([':', 'T', 'Z', '.', '-'], "_");
-    let filename = input.filename.trim();
-    let filename = if filename.is_empty() {
+    let base = basename_attachment(&input.filename);
+    let filename = if base.is_empty() {
         format!("attachment-{id}")
     } else {
-        filename.to_string()
+        base
     };
     let dest = state.workspace.attachments.join(&format!("{id}__{filename}"));
-
-    fs::write(&dest, &bytes)?;
-    let size = bytes.len() as i64;
 
     let mut db = state.db.lock().map_err(|_| AppError::Other("db lock poisoned".into()))?;
     let tx = db.transaction()?;
     verify_owner(&tx, uid, input.task_id, input.project_id, input.five_why_id)?;
+
+    fs::write(&dest, &bytes)?;
+    let size = bytes.len() as i64;
 
     tx.execute(
         "INSERT INTO attachments (task_id, project_id, filename, path, size, mime, created_at, five_why_id)

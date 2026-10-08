@@ -23,14 +23,15 @@ fn tag_with_count_from_row(row: &Row) -> rusqlite::Result<TagWithCount> {
 
 #[tauri::command(rename_all = "snake_case")]
 pub fn list_tags(state: State<'_, AppState>) -> Result<Vec<TagWithCount>, AppError> {
+    let uid = state.active_user()?;
     let db = state.db.lock().map_err(|_| AppError::Other("db lock poisoned".into()))?;
     let mut stmt = db.prepare(
         "SELECT t.id, t.name,
                 (SELECT COUNT(*) FROM task_tags tt WHERE tt.tag_id = t.id),
                 (SELECT COUNT(*) FROM project_tags pt WHERE pt.tag_id = t.id)
-         FROM tags t ORDER BY t.name COLLATE NOCASE",
+         FROM tags t WHERE t.user_id = ?1 ORDER BY t.name COLLATE NOCASE",
     )?;
-    let rows = stmt.query_map([], tag_with_count_from_row)?;
+    let rows = stmt.query_map([uid], tag_with_count_from_row)?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
@@ -38,16 +39,17 @@ pub fn list_tags(state: State<'_, AppState>) -> Result<Vec<TagWithCount>, AppErr
 pub fn create_tag(state: State<'_, AppState>, input: TagInput) -> Result<Tag, AppError> {
     ensure_non_empty(&input.name, "Name")?;
     let name = input.name.trim();
+    let uid = state.active_user()?;
     let db = state.db.lock().map_err(|_| AppError::Other("db lock poisoned".into()))?;
     let exists: bool = db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM tags WHERE name = ?1 COLLATE NOCASE)",
-        [name],
+        "SELECT EXISTS(SELECT 1 FROM tags WHERE user_id = ?1 AND name = ?2 COLLATE NOCASE)",
+        params![uid, name],
         |r| r.get(0),
     )?;
     if exists {
         return Err(AppError::Validation("A tag with that name already exists.".into()));
     }
-    db.execute("INSERT INTO tags (name) VALUES (?1)", [name])?;
+    db.execute("INSERT INTO tags (name, user_id) VALUES (?1, ?2)", params![name, uid])?;
     let id = db.last_insert_rowid();
     db.query_row("SELECT id, name FROM tags WHERE id = ?1", [id], tag_from_row)
         .map_err(AppError::from)
@@ -57,16 +59,20 @@ pub fn create_tag(state: State<'_, AppState>, input: TagInput) -> Result<Tag, Ap
 pub fn update_tag(state: State<'_, AppState>, id: i64, input: TagUpdate) -> Result<Tag, AppError> {
     ensure_non_empty(input.name.as_deref().unwrap_or(""), "Name")?;
     let name = input.name.as_deref().unwrap_or("").trim().to_string();
+    let uid = state.active_user()?;
     let db = state.db.lock().map_err(|_| AppError::Other("db lock poisoned".into()))?;
     let taken: bool = db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM tags WHERE name = ?1 COLLATE NOCASE AND id <> ?2)",
-        params![name, id],
+        "SELECT EXISTS(SELECT 1 FROM tags WHERE user_id = ?1 AND name = ?2 COLLATE NOCASE AND id <> ?3)",
+        params![uid, name, id],
         |r| r.get(0),
     )?;
     if taken {
         return Err(AppError::Validation("A tag with that name already exists.".into()));
     }
-    let updated = db.execute("UPDATE tags SET name = ?1 WHERE id = ?2", params![name, id])?;
+    let updated = db.execute(
+        "UPDATE tags SET name = ?1 WHERE id = ?2 AND user_id = ?3",
+        params![name, id, uid],
+    )?;
     if updated == 0 {
         return Err(AppError::NotFound(format!("Tag {id} not found.")));
     }
@@ -80,8 +86,9 @@ pub fn delete_tag(
     state: State<'_, AppState>,
     id: i64,
 ) -> Result<(), AppError> {
+    let uid = state.active_user()?;
     let db = state.db.lock().map_err(|_| AppError::Other("db lock poisoned".into()))?;
-    let deleted = db.execute("DELETE FROM tags WHERE id = ?1", [id])?;
+    let deleted = db.execute("DELETE FROM tags WHERE id = ?1 AND user_id = ?2", params![id, uid])?;
     if deleted == 0 {
         return Err(AppError::NotFound(format!("Tag {id} not found.")));
     }
@@ -98,10 +105,10 @@ fn task_owned(db: &rusqlite::Connection, task_id: i64, uid: i64) -> bool {
     .unwrap_or(false)
 }
 
-fn tag_exists(db: &rusqlite::Connection, tag_id: i64) -> bool {
+fn tag_owned(db: &rusqlite::Connection, tag_id: i64, uid: i64) -> bool {
     db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM tags WHERE id = ?1)",
-        [tag_id],
+        "SELECT EXISTS(SELECT 1 FROM tags WHERE id = ?1 AND user_id = ?2)",
+        params![tag_id, uid],
         |r| r.get::<_, bool>(0),
     )
     .unwrap_or(false)
@@ -119,7 +126,7 @@ pub fn add_task_tag(
     if !task_owned(&db, task_id, uid) {
         return Err(AppError::NotFound(format!("Task {task_id} not found.")));
     }
-    if !tag_exists(&db, tag_id) {
+    if !tag_owned(&db, tag_id, uid) {
         return Err(AppError::NotFound(format!("Tag {tag_id} not found.")));
     }
     db.execute(
@@ -181,7 +188,7 @@ pub fn add_project_tag(
     if !owned {
         return Err(AppError::NotFound(format!("Project {project_id} not found.")));
     }
-    if !tag_exists(&db, tag_id) {
+    if !tag_owned(&db, tag_id, uid) {
         return Err(AppError::NotFound(format!("Tag {tag_id} not found.")));
     }
     db.execute(

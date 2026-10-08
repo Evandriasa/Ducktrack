@@ -263,26 +263,6 @@ fn update_in_tx(
             }
         };
     }
-    macro_rules! opt_field {
-        ($new:expr, $col:ident, $name:expr) => {
-            if let Some(value) = &$new {
-                let old = existing.$col.clone().unwrap_or_default();
-                if old != *value {
-                    write_history(
-                        &tx,
-                        task_id,
-                        "changed",
-                        Some($name),
-                        Some(&old),
-                        Some(value),
-                        user_id,
-                    )?;
-                }
-                sets.push(concat!(stringify!($col), " = ?"));
-                values.push(rusqlite::types::Value::Text(value.clone()));
-            }
-        };
-    }
 
     field!(input.title, title, "title");
     field!(input.description, description, "description");
@@ -303,15 +283,40 @@ fn update_in_tx(
         sets.push("type = ?");
         values.push(rusqlite::types::Value::Text(value.clone()));
     }
-    opt_field!(input.due_date, due_date, "due_date");
+    // due_date: an empty string clears the field (stored as NULL)
+    if let Some(value) = &input.due_date {
+        let old = existing.due_date.clone().unwrap_or_default();
+        if old != *value {
+            write_history(
+                &tx,
+                task_id,
+                "changed",
+                Some("due_date"),
+                Some(&old),
+                Some(value),
+                user_id,
+            )?;
+        }
+        if value.is_empty() {
+            sets.push("due_date = NULL");
+        } else {
+            sets.push("due_date = ?");
+            values.push(rusqlite::types::Value::Text(value.clone()));
+        }
+    }
 
+    // assignee: an empty string clears the field (stored as NULL)
     if let Some(value) = &input.assignee {
         let old = existing.assignee.clone().unwrap_or_default();
         if old != *value {
             write_history(&tx, task_id, "changed", Some("assignee"), Some(&old), Some(value), user_id)?;
         }
-        sets.push("assignee = ?");
-        values.push(rusqlite::types::Value::Text(value.clone()));
+        if value.is_empty() {
+            sets.push("assignee = NULL");
+        } else {
+            sets.push("assignee = ?");
+            values.push(rusqlite::types::Value::Text(value.clone()));
+        }
     }
 
     if let Some(new_status) = &input.status {
@@ -336,24 +341,56 @@ fn update_in_tx(
         }
         sets.push("status = ?");
         values.push(rusqlite::types::Value::Text(new_status.clone()));
-        let completed_at = if new_status == "Completed" {
-            completed_ts.clone()
+        if new_status == "Completed" {
+            sets.push("completed_at = ?");
+            values.push(rusqlite::types::Value::Text(completed_ts.clone()));
         } else {
-            String::new()
-        };
-        sets.push("completed_at = ?");
-        values.push(rusqlite::types::Value::Text(completed_at));
+            sets.push("completed_at = NULL");
+        }
     }
 
     if let Some(value) = &input.parent_task_id {
-        let old = existing.parent_task_id.unwrap_or(-1);
-        if old != *value {
+        if *value == task_id {
+            return Err(AppError::Validation("A task cannot be its own parent.".into()));
+        }
+        let parent_owned: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = ?1 AND p.user_id = ?2)",
+            params![value, user_id],
+            |r| r.get(0),
+        )?;
+        if !parent_owned {
+            return Err(AppError::Validation(format!("Parent task {value} not found.")));
+        }
+        let mut cursor = *value;
+        let mut guard = 0;
+        loop {
+            let up: Option<i64> = tx.query_row(
+                "SELECT parent_task_id FROM tasks WHERE id = ?1 AND parent_task_id IS NOT NULL",
+                [cursor],
+                |r| r.get(0),
+            ).ok();
+            match up {
+                None => break,
+                Some(ancestor) if ancestor == task_id => {
+                    return Err(AppError::Validation("Cannot set a task as an ancestor of itself.".into()));
+                }
+                Some(ancestor) => {
+                    guard += 1;
+                    if guard > 1000 {
+                        return Err(AppError::Validation("Parent chain too deep.".into()));
+                    }
+                    cursor = ancestor;
+                }
+            }
+        }
+        let old = existing.parent_task_id;
+        if old != Some(*value) {
             write_history(
                 &tx,
                 task_id,
                 "changed",
                 Some("parent_task"),
-                Some(&old.to_string()),
+                Some(&old.unwrap_or(-1).to_string()),
                 Some(&value.to_string()),
                 user_id,
             )?;
@@ -375,8 +412,50 @@ fn update_in_tx(
                 user_id,
             )?;
         }
-        sets.push("estimated_minutes = ?");
-        values.push(rusqlite::types::Value::Integer(value));
+        // 0 (empty estimate field) clears the value back to NULL
+        if value == 0 {
+            sets.push("estimated_minutes = NULL");
+        } else {
+            sets.push("estimated_minutes = ?");
+            values.push(rusqlite::types::Value::Integer(value));
+        }
+    }
+
+    if let Some(new_pid) = input.project_id {
+        if new_pid != existing.project_id {
+            let owned: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM projects WHERE id = ?1 AND user_id = ?2)",
+                params![new_pid, user_id],
+                |r| r.get(0),
+            )?;
+            if !owned {
+                return Err(AppError::NotFound(format!("Project {new_pid} not found.")));
+            }
+            let old_key = existing.key.clone();
+            let new_key = next_task_key(tx, new_pid)?;
+            write_history(
+                &tx,
+                task_id,
+                "changed",
+                Some("project"),
+                Some(&existing.project_id.to_string()),
+                Some(&new_pid.to_string()),
+                user_id,
+            )?;
+            write_history(
+                &tx,
+                task_id,
+                "changed",
+                Some("key"),
+                Some(&old_key),
+                Some(&new_key),
+                user_id,
+            )?;
+            sets.push("key = ?");
+            values.push(rusqlite::types::Value::Text(new_key));
+            sets.push("project_id = ?");
+            values.push(rusqlite::types::Value::Integer(new_pid));
+        }
     }
 
     let sql = format!(
@@ -447,14 +526,20 @@ pub fn delete_task(
 
     let mut all = vec![id];
     let mut cursor = vec![id];
+    let mut seen = std::collections::HashSet::new();
+    seen.insert(id);
     while let Some(tid) = cursor.pop() {
         let children: Vec<i64> = tx
-            .prepare("SELECT id FROM tasks WHERE parent_task_id = ?1")?
-            .query_map([tid], |r| r.get(0))?
+            .prepare(
+                "SELECT t.id FROM tasks t JOIN projects p ON p.id = t.project_id WHERE t.parent_task_id = ?1 AND p.user_id = ?2",
+            )?
+            .query_map(params![tid, uid], |r| r.get(0))?
             .collect::<Result<Vec<_>, _>>()?;
         for child in children {
-            all.push(child);
-            cursor.push(child);
+            if seen.insert(child) {
+                all.push(child);
+                cursor.push(child);
+            }
         }
     }
     for tid in &all {

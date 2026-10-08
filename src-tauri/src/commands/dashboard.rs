@@ -32,7 +32,7 @@ pub fn get_overdue_tasks(state: State<'_, AppState>) -> Result<Vec<OverdueTask>,
          FROM tasks t JOIN projects p ON p.id = t.project_id
          WHERE t.status IN ('Todo','In Progress','Blocked')
            AND t.due_date IS NOT NULL AND t.due_date != ''
-           AND date(t.due_date) < date('now')
+           AND date(t.due_date) < date('now', 'localtime')
            AND p.user_id = ?1
          ORDER BY date(t.due_date) ASC",
     )?;
@@ -62,6 +62,14 @@ pub fn reset_workspace(app: AppHandle, state: State<'_, AppState>) -> Result<(),
     tx.execute("DELETE FROM work_logs", [])?;
     tx.execute("DELETE FROM task_history", [])?;
     tx.execute("DELETE FROM documents", [])?;
+    tx.execute("DELETE FROM comments", [])?;
+    tx.execute("DELETE FROM five_whys", [])?;
+    tx.execute("DELETE FROM timers", [])?;
+    tx.execute("DELETE FROM task_tags", [])?;
+    tx.execute("DELETE FROM project_tags", [])?;
+    tx.execute("DELETE FROM relationships", [])?;
+    tx.execute("DELETE FROM tags", [])?;
+    tx.execute("DELETE FROM inbox", [])?;
     tx.execute("DELETE FROM tasks", [])?;
     tx.execute("DELETE FROM projects", [])?;
     tx.commit()?;

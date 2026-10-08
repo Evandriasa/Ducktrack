@@ -161,7 +161,14 @@ pub fn restore_backup(
     let db = state.db.lock().map_err(|_| AppError::Other("db lock poisoned".into()))?;
 
     let source = match name {
-        Some(n) => state.workspace.backups.join(&n),
+        Some(n) => {
+            // Only ever resolve a plain filename inside the backups dir.
+            let base = Path::new(&n).file_name().and_then(|b| b.to_str()).unwrap_or("");
+            if base != n.trim() || !n.starts_with("ducktrack-") || !n.ends_with(".db") {
+                return Err(AppError::Validation("Invalid backup name.".into()));
+            }
+            state.workspace.backups.join(&n)
+        }
         None => {
             let names = scan_backups(&state.workspace.backups);
             if names.is_empty() {
@@ -181,6 +188,10 @@ pub fn restore_backup(
     drop(db);
 
     let db_path = &state.workspace.db_path;
+    // Copy to a temp file first; only swap it in once the copy succeeded, so a
+    // failed restore can never wipe the live database.
+    let tmp = db_path.with_extension("db.restoring");
+    fs::copy(&source, &tmp)?;
     if db_path.exists() {
         fs::remove_file(db_path)?;
     }
@@ -190,7 +201,7 @@ pub fn restore_backup(
             fs::remove_file(sidecar)?;
         }
     }
-    fs::copy(&source, db_path)?;
+    fs::rename(&tmp, db_path)?;
 
     let conn = super::super::database::connection::open(db_path)?;
     *state

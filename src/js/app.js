@@ -453,6 +453,7 @@ function renderTaskView(b) {
   const { task, history, comments, rels, myTags, projects } = b;
   const project = (projects || []).find(p => p.id === task.projectId);
   window.__dtTaskAttachments = task.attachments || [];
+  window.__dtEditorTaskId = task.id;
 
   const timeline = buildTimeline(history);
   const tagChips = (myTags || []).map(t => `<span class="tag-chip">${esc(t.name)}</span>`).join("") || `<span class="xs muted">No tags</span>`;
@@ -522,6 +523,7 @@ function renderTaskEditor(b) {
   const { task, history, comments, rels, myTags, tags, allTasks, projects } = b;
   const id = task.id;
   window.__dtTaskAttachments = task.attachments || [];
+  window.__dtEditorTaskId = task.id;
 
   const projectOpts = projects.map(p =>
     `<option value="${p.id}" ${p.id===task.projectId?'selected':''}>${esc(p.key)} — ${esc(p.name)}</option>`
@@ -622,9 +624,9 @@ function renderTaskEditor(b) {
           priority: document.getElementById("tm-priority").value,
           task_type: document.getElementById("tm-type").value,
           project_id: Number(document.getElementById("tm-project").value),
-          assignee: document.getElementById("tm-assignee").value || null,
-          due_date: document.getElementById("tm-due").value || null,
-          estimated_minutes: Number(document.getElementById("tm-estimate").value) || null,
+          assignee: document.getElementById("tm-assignee").value || "",
+          due_date: document.getElementById("tm-due").value || "",
+          estimated_minutes: Number(document.getElementById("tm-estimate").value) || 0,
         },
       });
       toast(`Updated ${task.key}`);
@@ -981,6 +983,34 @@ function openSearch() {
 
 searchInput?.addEventListener("focus", openSearch);
 searchInput?.addEventListener("click", openSearch);
+
+// Paste an image from the clipboard straight into the open task editor
+// (mirrors the "or paste with Ctrl+⌘+V" hint). Only fires for actual image
+// files, so pasting text into an input is never intercepted.
+document.addEventListener("paste", (e) => {
+  const modal = document.getElementById("task-modal");
+  if (!modal || modal.classList.contains("hidden")) return;
+  const clips = e.clipboardData;
+  if (!clips || !clips.items) return;
+  const img = Array.from(clips.items).find((it) => it.kind === "file" && it.type.startsWith("image/"));
+  if (!img) return;
+  e.preventDefault();
+  const file = img.getAsFile();
+  const taskId = window.__dtEditorTaskId;
+  if (!file || !taskId) return;
+  const reader = new FileReader();
+  reader.onload = async () => {
+    try {
+      await call("add_image_data", {
+        input: { data_url: String(reader.result), task_id: taskId, project_id: null },
+      });
+      toast(`Attached ${file.name || "pasted image"}`);
+      reloadTaskEditor(taskId);
+    } catch (err) { toast(err.message, true); }
+  };
+  reader.readAsDataURL(file);
+});
+
 document.addEventListener("keydown", (e) => {
   if (e.ctrlKey || e.metaKey) {
     if (e.key === "k") { e.preventDefault(); openSearch(); return; }
@@ -1399,7 +1429,7 @@ async function doLogin() {
   clearLoginErrors();
   if (!name || !password) { document.getElementById("login-error").textContent = "Enter your password."; return; }
   try {
-    try { await call("debug_log", { msg: `doLogin SUBMIT username=${JSON.stringify(name)} password_len=${password.length} pw_first=${JSON.stringify(password.slice(0,2))} pw_last=${JSON.stringify(password.slice(-2))} pw_chars=${[...password].map(c=>c.charCodeAt(0)).join(",")}` }); } catch {}
+    try { await call("debug_log", { msg: `doLogin SUBMIT username=${JSON.stringify(name)} password_len=${password.length}` }); } catch {}
     const user = await call("login_user", { username: name, password });
     try { await call("debug_log", { msg: `doLogin RESULT OK user_id=${user.id} name=${JSON.stringify(user.name)}` }); } catch {}
     localStorage.setItem("dt.lastUser", user.id);
